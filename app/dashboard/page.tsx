@@ -18,16 +18,39 @@ export default function DashboardPage() {
     try {
 
       const response = await fetch(
-       `${API_URL}/search`
+        `${API_URL}/dashboard`
       )
+
+      if (!response.ok) {
+
+        throw new Error(
+          `Failed to fetch dashboard: ${response.status}`
+        )
+
+      }
 
       const data = await response.json()
 
-      setStats(data)
+      console.log(
+        'Dashboard Data:',
+        data
+      )
+
+      setStats({
+        total_leads: data.total_leads || 0,
+        interested: data.interested || 0,
+        follow_up: data.follow_up || 0,
+        converted: data.converted || 0,
+        recent_searches: data.recent_searches || [],
+        total_users: data.total_users || 0
+      })
 
     } catch (error) {
 
-      console.error(error)
+      console.error(
+        'Dashboard Error:',
+        error
+      )
 
     } finally {
 
