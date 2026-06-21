@@ -4,6 +4,7 @@ import Sidebar from '../components/Sidebar'
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '../lib/supabase'
+import { API_URL } from '@/app/lib/config'
 
 export default function SearchPage() {
 
@@ -34,7 +35,7 @@ export default function SearchPage() {
         session?.user?.email || ''
 
       const response = await fetch(
-        'http://127.0.0.1:8000/search',
+         `${API_URL}/search`,
         {
           method: 'POST',
           headers: {

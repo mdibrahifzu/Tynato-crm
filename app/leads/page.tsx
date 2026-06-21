@@ -2,6 +2,7 @@
 
 import Sidebar from '../components/Sidebar'
 import { useEffect, useState } from 'react'
+import { API_URL } from '@/app/lib/config'
 
 interface Lead {
   id: string
@@ -30,7 +31,7 @@ export default function LeadsPage() {
     try {
 
       const response = await fetch(
-        'http://localhost:8000/leads'
+       `${API_URL}/leads`
       )
 
       const data = await response.json()
@@ -58,7 +59,7 @@ export default function LeadsPage() {
         editedLeads[leadId]
 
       const response = await fetch(
-        `http://localhost:8000/leads/${leadId}`,
+        `${API_URL}/dashboard/leads/${leadId}`,
         {
           method: 'PUT',
           headers: {

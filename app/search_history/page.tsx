@@ -2,6 +2,7 @@
 
 import Sidebar from '../components/Sidebar'
 import { useEffect, useState } from 'react'
+import { API_URL } from '@/app/lib/config'
 
 interface SearchHistory {
   id: string
@@ -24,7 +25,7 @@ export default function SearchHistoryPage() {
     try {
 
       const response = await fetch(
-        'http://localhost:8000/search_history'
+        `${API_URL}/search_history`
       )
 
       const data = await response.json()

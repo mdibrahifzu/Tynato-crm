@@ -2,6 +2,7 @@
 
 import Sidebar from '../components/Sidebar'
 import { useEffect, useState } from 'react'
+import { API_URL } from '@/app/lib/config'
 
 export default function DashboardPage() {
 
@@ -17,7 +18,7 @@ export default function DashboardPage() {
     try {
 
       const response = await fetch(
-        'http://localhost:8000/dashboard'
+       `${API_URL}/search`
       )
 
       const data = await response.json()
