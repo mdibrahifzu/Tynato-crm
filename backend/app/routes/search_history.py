@@ -2,40 +2,45 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 
-from app.dependencies import get_db
+from app.dependencies import get_db, get_current_user
 
 router = APIRouter()
 
+
 @router.get("/search_history")
 def get_search_history(
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user)
 ):
-
-    try:
-
-        print("Fetching search history...")
-
+    if current_user["role"] == "admin":
         result = db.execute(
             text(
                 """
-                SELECT *
+                SELECT
+                    id,
+                    query,
+                    user_email,
+                    created_at
                 FROM search_history
                 ORDER BY created_at DESC
                 """
             )
         )
+    else:
+        result = db.execute(
+            text(
+                """
+                SELECT
+                    id,
+                    query,
+                    user_email,
+                    created_at
+                FROM search_history
+                WHERE owner_id = :owner_id
+                ORDER BY created_at DESC
+                """
+            ),
+            {"owner_id": current_user["id"]}
+        )
 
-        rows = result.mappings().all()
-
-        print(f"Rows Found: {len(rows)}")
-
-        return rows
-
-    except Exception as e:
-
-        print("SEARCH HISTORY ERROR:")
-        print(str(e))
-
-        return {
-            "error": str(e)
-        }
+    return result.mappings().all()

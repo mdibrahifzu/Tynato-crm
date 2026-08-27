@@ -3,6 +3,8 @@
 import Sidebar from '../components/Sidebar'
 import { useEffect, useState } from 'react'
 import { API_URL } from '@/app/lib/config'
+import { supabase } from '@/app/lib/supabase'
+import { apiFetch } from '@/app/lib/api'
 
 export default function DashboardPage() {
 
@@ -10,16 +12,28 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    fetchDashboard()
-  }, [])
+  checkAuthentication()
+}, [])
+
+async function checkAuthentication() {
+
+  const {
+    data: { session }
+  } = await supabase.auth.getSession()
+
+  if (!session) {
+    window.location.href = '/login'
+    return
+  }
+
+  fetchDashboard()
+}
 
   async function fetchDashboard() {
 
     try {
 
-      const response = await fetch(
-        `${API_URL}/dashboard`
-      )
+      const response = await apiFetch('/dashboard')
 
       if (!response.ok) {
 

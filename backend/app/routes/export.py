@@ -1,14 +1,17 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from fastapi.responses import FileResponse
 import pandas as pd
 
 from app.database import engine
+from app.dependencies import require_admin
 
 router = APIRouter()
 
-@router.get("/export")
-def export_leads():
 
+@router.get("/export")
+def export_leads(
+    current_user=Depends(require_admin)
+):
     query = """
     SELECT *
     FROM leads

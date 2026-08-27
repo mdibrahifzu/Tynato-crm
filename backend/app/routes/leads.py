@@ -2,15 +2,16 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 
-from app.dependencies import get_db
+from app.dependencies import get_db, get_current_user
 
 router = APIRouter()
 
+
 @router.get("/leads")
 def get_leads(
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user)
 ):
-
     result = db.execute(
         text(
             """
@@ -23,9 +24,13 @@ def get_leads(
                 status,
                 notes
             FROM leads
-            ORDER BY business_name
+            WHERE owner_id = :owner_id
+            ORDER BY id DESC
             """
-        )
+        ),
+        {
+            "owner_id": current_user["id"]
+        }
     )
 
     return result.mappings().all()

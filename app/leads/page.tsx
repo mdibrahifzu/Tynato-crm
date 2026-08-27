@@ -3,6 +3,7 @@
 import Sidebar from '../components/Sidebar'
 import { useEffect, useState } from 'react'
 import { API_URL } from '@/app/lib/config'
+import { apiFetch } from '@/app/lib/api'
 
 interface Lead {
   id: string
@@ -30,9 +31,7 @@ export default function LeadsPage() {
 
     try {
 
-      const response = await fetch(
-       `${API_URL}/leads`
-      )
+      const response = await apiFetch('/leads')
 
       const data = await response.json()
 
@@ -58,22 +57,16 @@ export default function LeadsPage() {
       const leadData =
         editedLeads[leadId]
 
-      const response = await fetch(
-        `${API_URL}/dashboard/leads/${leadId}`,
-        {
-          method: 'PUT',
-          headers: {
-            'Content-Type':
-              'application/json'
-          },
-          body: JSON.stringify({
-            status:
-              leadData?.status || 'new',
-            notes:
-              leadData?.notes || ''
-          })
-        }
-      )
+      const response = await apiFetch(`/leads/${leadId}`, {
+  method: 'PUT',
+  headers: {
+    'Content-Type': 'application/json'
+  },
+  body: JSON.stringify({
+    status: leadData?.status || 'new',
+    notes: leadData?.notes || ''
+  })
+})
 
       const data =
         await response.json()
