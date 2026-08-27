@@ -3,83 +3,88 @@
 import Sidebar from '../components/Sidebar'
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { supabase } from '../lib/supabase'
-import { API_URL } from '@/app/lib/config'
+import { apiFetch } from '@/app/lib/api'
+import { supabase } from '@/app/lib/supabase'
 
 export default function SearchPage() {
-
   const [query, setQuery] = useState('')
   const [loading, setLoading] = useState(false)
+  const [showUpgrade, setShowUpgrade] = useState(false)
 
   const router = useRouter()
 
   async function searchLeads() {
+    const trimmedQuery = query.trim()
 
-    if (!query.trim()) {
-
+    if (!trimmedQuery) {
       alert('Please enter a search query')
-
       return
-
     }
 
     setLoading(true)
+    setShowUpgrade(false)
 
     try {
+      const { data: sessionData } = await supabase.auth.getSession()
+      const userEmail = sessionData.session?.user?.email
 
-      const {
-        data: { session }
-      } = await supabase.auth.getSession()
+      if (!userEmail) {
+        alert('Your session has expired. Please log in again.')
+        return
+      }
 
-      const email =
-        session?.user?.email || ''
+      const response = await apiFetch('/search', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          query: trimmedQuery,
+          user_email: userEmail,
+        }),
+      })
 
-      const response = await fetch(
-         `${API_URL}/search`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type':
-              'application/json'
-          },
-          body: JSON.stringify({
-            query,
-            user_email: email
-          })
-        }
-      )
+      if (response.status === 402) {
+        setShowUpgrade(true)
+        return
+      }
 
-      const data =
-        await response.json()
+      const data = await response.json()
+
+      if (!response.ok) {
+        const detail =
+          typeof data?.detail === 'string'
+            ? data.detail
+            : data?.detail?.message
+              ? data.detail.message
+              : JSON.stringify(data)
+
+        console.error('SEARCH API ERROR:', response.status, data)
+
+        alert(`Search API error (${response.status}): ${detail}`)
+        return
+      }
+
+      alert(`${data.saved_leads ?? 0} leads saved successfully`)
+      router.push('/leads')
+    } catch (error) {
+      console.error('Search error:', error)
 
       alert(
-        `${data.saved_leads} leads saved successfully`
+        error instanceof Error
+          ? error.message
+          : 'Search failed'
       )
-
-      router.push('/leads')
-
-    } catch (error) {
-
-      console.error(error)
-
-      alert('Search failed')
-
     } finally {
-
       setLoading(false)
-
     }
-
   }
 
   return (
-
     <div className="flex min-h-screen">
-
       <Sidebar />
 
       <div className="flex-1 p-10">
-
         <h1 className="text-4xl font-bold mb-8">
           Find Leads
         </h1>
@@ -87,82 +92,55 @@ export default function SearchPage() {
         <div
           className="rounded-xl p-8"
           style={{
-            background:
-              'var(--bg-card)',
-            border:
-              '1px solid rgba(255,255,255,0.08)'
+            background: 'var(--bg-card)',
+            border: '1px solid rgba(255,255,255,0.08)',
           }}
         >
-
           <label
             className="block mb-3 font-medium"
-            style={{
-              color:
-                'var(--text-primary)'
-            }}
+            style={{ color: 'var(--text-primary)' }}
           >
             Search Query
           </label>
 
           <input
-            className="
-            w-full
-            p-4
-            rounded-lg
-            border
-            "
+            className="w-full p-4 rounded-lg border"
             placeholder="e.g. schools in trichy"
             value={query}
-            onChange={(e) =>
-              setQuery(
-                e.target.value
-              )
-            }
+            onChange={(e) => setQuery(e.target.value)}
           />
 
           <p
             className="mt-3 text-sm"
-            style={{
-              color:
-                'var(--text-muted)'
-            }}
+            style={{ color: 'var(--text-muted)' }}
           >
-            Search businesses,
-            schools, hospitals,
-            restaurants, clinics,
-            colleges, hotels and
+            Search businesses, schools, hospitals,
+            restaurants, clinics, colleges, hotels and
             other local businesses.
           </p>
 
           <button
-            className="
-            bg-blue-600
-            hover:bg-blue-700
-            text-white
-            px-6
-            py-3
-            rounded-lg
-            mt-6
-            transition
-            "
+            className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-lg mt-6 transition"
             onClick={searchLeads}
             disabled={loading}
           >
-
-            {
-              loading
-                ? 'Searching...'
-                : 'Search Leads'
-            }
-
+            {loading ? 'Searching...' : 'Search Leads'}
           </button>
 
+          {showUpgrade && (
+            <div className="mt-6 rounded-lg border border-yellow-500/30 bg-yellow-500/10 p-5">
+              <h2 className="text-lg font-semibold">
+                Free Trial Limit Reached
+              </h2>
+
+              <p className="mt-2 text-sm">
+                You have used your 2 free lead searches.
+                Upgrade your subscription to continue searching.
+              </p>
+            </div>
+          )}
         </div>
-
       </div>
-
     </div>
-
   )
-
 }
