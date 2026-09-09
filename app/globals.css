@@ -1,264 +1,158 @@
 @import "tailwindcss";
 
-/* =======================================
-   DEFAULT THEME
-======================================= */
-
 :root {
-
-  --bg-sidebar: #0f172a;
-  --bg-main: #0f172a;
-  --bg-card: #1e293b;
-  --bg-surface: #111827;
-
-  --text-primary: #ffffff;
-  --text-muted: #cbd5e1;
-
+  --bg-sidebar: #0b1220;
+  --bg-main: #0b1220;
+  --bg-card: #111a2a;
+  --bg-surface: #0f1726;
+  --text-primary: #f8fafc;
+  --text-muted: #94a3b8;
+  --text-soft: #64748b;
   --accent: #3b82f6;
+  --accent-soft: rgba(59, 130, 246, 0.12);
+  --border-soft: rgba(148, 163, 184, 0.14);
 }
-
-/* =======================================
-   MIDNIGHT THEME
-======================================= */
 
 [data-theme='midnight'] {
-
-  --bg-sidebar: #0f172a;
-  --bg-main: #0f172a;
-  --bg-card: #1e293b;
-  --bg-surface: #111827;
-
-  --text-primary: #ffffff;
-  --text-muted: #cbd5e1;
-
+  --bg-sidebar: #0b1220;
+  --bg-main: #0b1220;
+  --bg-card: #111a2a;
+  --bg-surface: #0f1726;
+  --text-primary: #f8fafc;
+  --text-muted: #94a3b8;
+  --text-soft: #64748b;
   --accent: #3b82f6;
+  --accent-soft: rgba(59, 130, 246, 0.12);
+  --border-soft: rgba(148, 163, 184, 0.14);
 }
-
-/* =======================================
-   CLOUD THEME
-======================================= */
 
 [data-theme='cloud'] {
-
-  --bg-sidebar: #1e293b;
-  --bg-main: #f8fafc;
+  --bg-sidebar: #172033;
+  --bg-main: #f6f8fc;
   --bg-card: #ffffff;
-  --bg-surface: #f1f5f9;
-
+  --bg-surface: #eef2f7;
   --text-primary: #0f172a;
-  --text-muted: #475569;
-
-  --accent: #3b82f6;
+  --text-muted: #64748b;
+  --text-soft: #94a3b8;
+  --accent: #2563eb;
+  --accent-soft: rgba(37, 99, 235, 0.08);
+  --border-soft: rgba(15, 23, 42, 0.08);
 }
-
-/* =======================================
-   VIOLET THEME
-======================================= */
 
 [data-theme='violet'] {
-
-  --bg-sidebar: #1a1035;
-  --bg-main: #12082a;
-  --bg-card: #1e1040;
-  --bg-surface: #16092e;
-
-  --text-primary: #ffffff;
+  --bg-sidebar: #171029;
+  --bg-main: #0f0a20;
+  --bg-card: #1a1233;
+  --bg-surface: #140d28;
+  --text-primary: #faf7ff;
   --text-muted: #c4b5fd;
-
+  --text-soft: #a78bfa;
   --accent: #8b5cf6;
+  --accent-soft: rgba(139, 92, 246, 0.12);
+  --border-soft: rgba(196, 181, 253, 0.12);
 }
-
-/* =======================================
-   BODY
-======================================= */
 
 html,
 body {
-
   margin: 0;
   padding: 0;
-
   min-height: 100vh;
-
   background: var(--bg-main);
   color: var(--text-primary);
-
-  transition: all .3s ease;
 }
 
-/* =======================================
-   GLOBAL TEXT FIX
-======================================= */
+body {
+  transition: background-color .2s ease, color .2s ease;
+}
 
-body,
-div,
-span,
-p,
-label,
-td,
-th,
+* {
+  box-sizing: border-box;
+}
+
+button,
+a,
 input,
 textarea,
 select {
-
-  color: var(--text-primary);
+  -webkit-tap-highlight-color: transparent;
 }
-
-h1,
-h2,
-h3,
-h4,
-h5,
-h6 {
-
-  color: var(--text-primary);
-  font-weight: 700;
-}
-
-/* =======================================
-   TABLE FIX
-======================================= */
-
-table {
-
-  width: 100%;
-  color: var(--text-primary);
-
-  border-collapse: collapse;
-}
-
-thead {
-
-  background: var(--bg-card);
-}
-
-th {
-
-  color: var(--text-primary);
-  font-weight: 600;
-}
-
-td {
-
-  color: var(--text-primary);
-}
-
-tr {
-
-  border-color:
-    rgba(255,255,255,0.08);
-}
-
-/* =======================================
-   INPUTS
-======================================= */
 
 input,
 textarea,
 select {
-
-  background: transparent;
-
+  background: var(--bg-surface);
   color: var(--text-primary);
-
-  border:
-    1px solid rgba(255,255,255,0.15);
-
+  border: 1px solid var(--border-soft);
   outline: none;
+}
+
+input:focus,
+textarea:focus,
+select:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
 input::placeholder,
 textarea::placeholder {
-
-  color: var(--text-muted);
+  color: var(--text-soft);
 }
 
-/* =======================================
-   CRM CARD
-======================================= */
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+th,
+td {
+  color: var(--text-primary);
+}
 
 .crm-card {
-
   background: var(--bg-card);
-
-  border-radius: 16px;
-
-  padding: 24px;
-
-  border-top:
-    2px solid var(--accent);
-
-  box-shadow:
-    0 4px 24px rgba(0,0,0,.25);
+  border: 1px solid var(--border-soft);
+  border-radius: 18px;
+  box-shadow: 0 14px 35px rgba(2, 8, 23, 0.14);
 }
-
-/* =======================================
-   CRM SURFACE
-======================================= */
 
 .crm-surface {
-
   background: var(--bg-surface);
-
-  border-radius: 12px;
+  border-radius: 14px;
 }
 
-/* =======================================
-   MUTED TEXT
-======================================= */
-
 .crm-text-muted {
-
   color: var(--text-muted);
 }
 
-/* =======================================
-   MIDNIGHT BACKGROUND
-======================================= */
-
-[data-theme='midnight'] body {
-
-  background-image:
-    radial-gradient(
-      rgba(255,255,255,0.04) 1px,
-      transparent 1px
-    );
-
-  background-size: 24px 24px;
-}
-
-/* =======================================
-   VIOLET GLOW
-======================================= */
-
-[data-theme='violet'] body {
-
+.crm-page {
+  min-height: 100vh;
   background:
-    radial-gradient(
-      ellipse at top left,
-      rgba(139,92,246,0.18),
-      transparent 60%
-    ),
+    radial-gradient(circle at 85% 0%, rgba(59, 130, 246, 0.08), transparent 30%),
     var(--bg-main);
 }
 
-/* =======================================
-   SCROLLBAR
-======================================= */
+[data-theme='violet'] .crm-page {
+  background:
+    radial-gradient(circle at 85% 0%, rgba(139, 92, 246, 0.12), transparent 32%),
+    var(--bg-main);
+}
 
 ::-webkit-scrollbar {
-
-  width: 10px;
+  width: 9px;
+  height: 9px;
 }
 
 ::-webkit-scrollbar-track {
-
-  background: var(--bg-sidebar);
+  background: var(--bg-surface);
 }
 
 ::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.25);
+  border-radius: 999px;
+}
 
-  background: var(--accent);
-
-  border-radius: 10px;
+@media (max-width: 900px) {
+  .crm-card {
+    border-radius: 16px;
+  }
 }

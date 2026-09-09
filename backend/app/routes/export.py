@@ -1,35 +1,107 @@
-from fastapi import APIRouter, Depends
-from fastapi.responses import FileResponse
-import pandas as pd
+from io import StringIO
 
-from app.database import engine
-from app.dependencies import require_admin
+import pandas as pd
+from fastapi import APIRouter, Depends
+from fastapi.responses import StreamingResponse
+from sqlalchemy import text
+from sqlalchemy.orm import Session
+
+from app.dependencies import (
+    get_db,
+    get_current_user,
+    get_current_team,
+)
 
 router = APIRouter()
 
 
+EXPORT_COLUMNS = [
+    "id",
+    "business_name",
+    "phone",
+    "website",
+    "address",
+    "search_query",
+    "created_at",
+    "status",
+    "notes",
+    "last_updated",
+    "follow_up_date",
+    "assigned_to",
+    "owner_id",
+    "user_id",
+    "team_id",
+    "attachment_url",
+    "attachment_name",
+]
+
+
 @router.get("/export")
 def export_leads(
-    current_user=Depends(require_admin)
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+    team=Depends(get_current_team),
 ):
-    query = """
-    SELECT *
-    FROM leads
-    """
+    columns_sql = ", ".join(EXPORT_COLUMNS)
 
-    df = pd.read_sql(
-        query,
-        engine
+    if current_user["role"] == "admin":
+        query = f"""
+            SELECT {columns_sql}
+            FROM leads
+            ORDER BY created_at DESC NULLS LAST, id DESC
+        """
+        params = {}
+
+    elif team:
+        query = f"""
+            SELECT {columns_sql}
+            FROM leads
+            WHERE team_id = :team_id
+            ORDER BY created_at DESC NULLS LAST, id DESC
+        """
+        params = {
+            "team_id": team["team_id"],
+        }
+
+    else:
+        query = f"""
+            SELECT {columns_sql}
+            FROM leads
+            WHERE owner_id = :owner_id
+              AND team_id IS NULL
+            ORDER BY created_at DESC NULLS LAST, id DESC
+        """
+        params = {
+            "owner_id": current_user["id"],
+        }
+
+    result = db.execute(
+        text(query),
+        params,
     )
 
-    file_name = "leads.csv"
+    rows = result.mappings().all()
+
+    df = pd.DataFrame(
+        rows,
+        columns=EXPORT_COLUMNS,
+    )
+
+    output = StringIO()
 
     df.to_csv(
-        file_name,
-        index=False
+        output,
+        index=False,
     )
 
-    return FileResponse(
-        file_name,
-        filename=file_name
+    output.seek(0)
+
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv",
+        headers={
+            "Content-Disposition": (
+                'attachment; filename="leads.csv"'
+            )
+        },
     )

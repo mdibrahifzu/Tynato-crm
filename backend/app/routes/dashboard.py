@@ -2,7 +2,13 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 
-from app.dependencies import get_db, get_current_user
+from app.dependencies import (
+    get_db,
+    get_current_user,
+    get_current_team,
+    get_pending_team_membership,
+)
+
 
 router = APIRouter()
 
@@ -10,44 +16,98 @@ router = APIRouter()
 @router.get("/dashboard")
 def dashboard(
     db: Session = Depends(get_db),
-    current_user=Depends(get_current_user)
+    current_user=Depends(get_current_user),
+    team=Depends(get_current_team),
+    pending_membership=Depends(get_pending_team_membership),
 ):
-    owner_id = current_user["id"]
-    is_admin = current_user["role"] == "admin"
+    if pending_membership and current_user["role"] != "admin":
+        return {
+            "status": "pending",
+            "message": "Your team invitation is pending approval.",
+        }
 
-    # --------------------------------------------------
-    # Lead statistics
-    # Admins see all leads.
-    # Normal users see only their own leads.
-    # --------------------------------------------------
+    # =====================================================
+    # ADMIN
+    # =====================================================
 
-    if is_admin:
-        total_leads = db.execute(
-            text("SELECT COUNT(*) FROM leads")
-        ).scalar() or 0
+    if current_user["role"] == "admin":
+        lead_filter = ""
+        params = {}
 
-        interested = db.execute(
-            text(
-                "SELECT COUNT(*) FROM leads "
-                "WHERE status = 'interested'"
-            )
-        ).scalar() or 0
+    # =====================================================
+    # TEAM USER
+    # =====================================================
 
-        follow_up = db.execute(
-            text(
-                "SELECT COUNT(*) FROM leads "
-                "WHERE status = 'follow_up'"
-            )
-        ).scalar() or 0
+    elif team:
+        lead_filter = "WHERE team_id = :team_id"
+        params = {
+            "team_id": team["team_id"],
+        }
 
-        converted = db.execute(
-            text(
-                "SELECT COUNT(*) FROM leads "
-                "WHERE status = 'converted'"
-            )
-        ).scalar() or 0
+    # =====================================================
+    # PERSONAL USER
+    # =====================================================
 
-        # Admin can see all search history.
+    else:
+        lead_filter = """
+            WHERE owner_id = :owner_id
+              AND team_id IS NULL
+        """
+        params = {
+            "owner_id": current_user["id"],
+        }
+
+    total_leads = db.execute(
+        text(
+            f"""
+            SELECT COUNT(*)
+            FROM leads
+            {lead_filter}
+            """
+        ),
+        params,
+    ).scalar() or 0
+
+    interested = db.execute(
+        text(
+            f"""
+            SELECT COUNT(*)
+            FROM leads
+            {lead_filter}
+            {"AND" if lead_filter else "WHERE"}
+            status = 'interested'
+            """
+        ),
+        params,
+    ).scalar() or 0
+
+    follow_up = db.execute(
+        text(
+            f"""
+            SELECT COUNT(*)
+            FROM leads
+            {lead_filter}
+            {"AND" if lead_filter else "WHERE"}
+            status = 'follow_up'
+            """
+        ),
+        params,
+    ).scalar() or 0
+
+    converted = db.execute(
+        text(
+            f"""
+            SELECT COUNT(*)
+            FROM leads
+            {lead_filter}
+            {"AND" if lead_filter else "WHERE"}
+            status = 'converted'
+            """
+        ),
+        params,
+    ).scalar() or 0
+
+    if current_user["role"] == "admin":
         recent_searches = db.execute(
             text(
                 """
@@ -59,62 +119,60 @@ def dashboard(
             )
         ).fetchall()
 
+    elif team:
+        recent_searches = db.execute(
+            text(
+                """
+                SELECT query
+                FROM search_history
+                WHERE team_id = :team_id
+                ORDER BY created_at DESC
+                LIMIT 5
+                """
+            ),
+            {
+                "team_id": team["team_id"],
+            },
+        ).fetchall()
+
     else:
-        total_leads = db.execute(
-            text(
-                "SELECT COUNT(*) FROM leads "
-                "WHERE owner_id = :owner_id"
-            ),
-            {"owner_id": owner_id}
-        ).scalar() or 0
-
-        interested = db.execute(
-            text(
-                "SELECT COUNT(*) FROM leads "
-                "WHERE owner_id = :owner_id "
-                "AND status = 'interested'"
-            ),
-            {"owner_id": owner_id}
-        ).scalar() or 0
-
-        follow_up = db.execute(
-            text(
-                "SELECT COUNT(*) FROM leads "
-                "WHERE owner_id = :owner_id "
-                "AND status = 'follow_up'"
-            ),
-            {"owner_id": owner_id}
-        ).scalar() or 0
-
-        converted = db.execute(
-            text(
-                "SELECT COUNT(*) FROM leads "
-                "WHERE owner_id = :owner_id "
-                "AND status = 'converted'"
-            ),
-            {"owner_id": owner_id}
-        ).scalar() or 0
-
-        # Normal user sees ONLY their own search history.
         recent_searches = db.execute(
             text(
                 """
                 SELECT query
                 FROM search_history
                 WHERE owner_id = :owner_id
+                  AND team_id IS NULL
                 ORDER BY created_at DESC
                 LIMIT 5
                 """
             ),
-            {"owner_id": owner_id}
+            {
+                "owner_id": current_user["id"],
+            },
         ).fetchall()
 
-    return {
+    response = {
         "total_leads": total_leads,
         "interested": interested,
         "follow_up": follow_up,
         "converted": converted,
         "recent_searches": [
             row[0] for row in recent_searches
-        ]
+        ],
     }
+
+    if team:
+        response.update(
+            {
+                "team_id": team["team_id"],
+                "team_name": team["team_name"],
+                "team_role": team["team_role"],
+                "plan": team["plan"],
+                "searches_used": team["searches_used"],
+                "search_limit": team["search_limit"],
+                "member_limit": team["member_limit"],
+            }
+        )
+
+    return response
