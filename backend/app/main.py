@@ -1,7 +1,7 @@
 from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
-from app.routes.invoices import router as invoices_router
+from app.routes.invoice import router as invoice_router
 from app.database import engine
 from app.routes.search import router as search_router
 from app.routes.leads import router as leads_router
@@ -12,6 +12,7 @@ from app.routes.search_history import router as search_history_router
 from app.routes.users import router as users_router
 from app.routes.lead_status import router as lead_status_router
 from app.routes.team import router as team_router
+from app.routes.business_settings import router as business_settings_router
 from app.dependencies import require_admin
 from app.routes.audio import router as audio_router
 from app.routes.custom_leads import (
@@ -43,7 +44,8 @@ app.include_router(users_router)
 app.include_router(lead_status_router)
 app.include_router(team_router)
 app.include_router(audio_router)
-app.include_router(invoices_router)
+app.include_router(invoice_router)
+app.include_router(business_settings_router)
 app.include_router(
     custom_leads_router
 )

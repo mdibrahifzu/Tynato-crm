@@ -7,18 +7,28 @@ import { apiFetch } from '@/app/lib/api'
 
 interface DashboardStats {
   total_leads: number
+  searched_leads: number
+  manual_imported_leads: number
+
+  new: number
   interested: number
   follow_up: number
   converted: number
+
   recent_searches: string[]
   total_users: number
 }
 
 const emptyStats: DashboardStats = {
   total_leads: 0,
+  searched_leads: 0,
+  manual_imported_leads: 0,
+
+  new: 0,
   interested: 0,
   follow_up: 0,
   converted: 0,
+
   recent_searches: [],
   total_users: 0,
 }
@@ -147,13 +157,20 @@ export default function DashboardPage() {
       console.log('Dashboard Data:', data)
 
       setStats({
-        total_leads: data.total_leads || 0,
-        interested: data.interested || 0,
-        follow_up: data.follow_up || 0,
-        converted: data.converted || 0,
-        recent_searches: data.recent_searches || [],
-        total_users: data.total_users || 0,
-      })
+  total_leads: data.total_leads || 0,
+
+  searched_leads: data.searched_leads || 0,
+  manual_imported_leads:
+    data.manual_imported_leads || 0,
+
+  new: data.new || 0,
+  interested: data.interested || 0,
+  follow_up: data.follow_up || 0,
+  converted: data.converted || 0,
+
+  recent_searches: data.recent_searches || [],
+  total_users: data.total_users || 0,
+})
     } catch (error) {
       console.error('Dashboard Error:', error)
     } finally {
@@ -249,55 +266,113 @@ export default function DashboardPage() {
               accent="#a78bfa"
             />
           </section>
+          
 
           {/* Main analytics */}
           <section className="mt-6 grid grid-cols-1 gap-6 xl:grid-cols-[1.35fr_0.9fr]">
             <div className="crm-card p-6">
-              <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-                <div>
-                  <h2 className="text-lg font-semibold">
-                    Lead Funnel
-                  </h2>
-                  <p className="mt-1 text-xs text-slate-500">
-                    Current distribution across the main lead states.
-                  </p>
-                </div>
+  <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+    <div>
+      <h2 className="text-lg font-semibold">
+        Lead Overview
+      </h2>
 
-                <span className="rounded-full border border-blue-400/10 bg-blue-400/10 px-3 py-1 text-[11px] font-medium text-blue-300">
-                  {stats.total_leads} total
-                </span>
-              </div>
+      <p className="mt-1 text-xs text-slate-500">
+        Lead sources and current pipeline status.
+      </p>
+    </div>
 
-              <div className="mt-8 space-y-7">
-                <FunnelRow
-                  label="Total Leads"
-                  value={stats.total_leads}
-                  total={stats.total_leads}
-                  barClass="bg-blue-400"
-                />
+    <span className="rounded-full border border-blue-400/10 bg-blue-400/10 px-3 py-1 text-[11px] font-medium text-blue-300">
+      {stats.total_leads} total
+    </span>
+  </div>
 
-                <FunnelRow
-                  label="Interested"
-                  value={stats.interested}
-                  total={stats.total_leads}
-                  barClass="bg-emerald-400"
-                />
+  {/* Lead Sources */}
+  <div className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-3">
 
-                <FunnelRow
-                  label="Follow Up"
-                  value={stats.follow_up}
-                  total={stats.total_leads}
-                  barClass="bg-amber-400"
-                />
+    <div className="crm-surface p-4">
+      <p className="text-[11px] uppercase tracking-wider text-slate-500">
+        Total Leads
+      </p>
 
-                <FunnelRow
-                  label="Converted"
-                  value={stats.converted}
-                  total={stats.total_leads}
-                  barClass="bg-violet-400"
-                />
-              </div>
-            </div>
+      <p className="mt-2 text-3xl font-bold">
+        {stats.total_leads}
+      </p>
+    </div>
+
+    <div className="crm-surface p-4">
+      <p className="text-[11px] uppercase tracking-wider text-slate-500">
+        Searched Leads
+      </p>
+
+      <p className="mt-2 text-3xl font-bold">
+        {stats.searched_leads}
+      </p>
+    </div>
+
+    <div className="crm-surface p-4">
+      <p className="text-[11px] uppercase tracking-wider text-slate-500">
+        Manual Imported
+      </p>
+
+      <p className="mt-2 text-3xl font-bold">
+        {stats.manual_imported_leads}
+      </p>
+    </div>
+
+  </div>
+
+  {/* Status */}
+  <div className="mt-6">
+    <h3 className="text-sm font-semibold text-slate-300">
+      Lead Status
+    </h3>
+
+    <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+
+      <div className="crm-surface flex items-center justify-between p-4">
+        <span className="text-sm text-slate-400">
+          New
+        </span>
+
+        <span className="text-xl font-bold">
+          {stats.new}
+        </span>
+      </div>
+
+      <div className="crm-surface flex items-center justify-between p-4">
+        <span className="text-sm text-slate-400">
+          Interested
+        </span>
+
+        <span className="text-xl font-bold">
+          {stats.interested}
+        </span>
+      </div>
+
+      <div className="crm-surface flex items-center justify-between p-4">
+        <span className="text-sm text-slate-400">
+          Follow-up
+        </span>
+
+        <span className="text-xl font-bold">
+          {stats.follow_up}
+        </span>
+      </div>
+
+      <div className="crm-surface flex items-center justify-between p-4">
+        <span className="text-sm text-slate-400">
+          Converted
+        </span>
+
+        <span className="text-xl font-bold">
+          {stats.converted}
+        </span>
+      </div>
+
+    </div>
+  </div>
+</div>
 
             <div className="crm-card p-6">
               <div className="flex items-start justify-between">

@@ -11,35 +11,37 @@ export default function LoginPage() {
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
 
-  async function login() {
-    const cleanEmail = email.trim().toLowerCase()
+async function login(e: React.FormEvent<HTMLFormElement>) {
+  e.preventDefault()
 
-    if (!cleanEmail || !password) {
-      alert('Please enter your email and password')
+  const cleanEmail = email.trim().toLowerCase()
+
+  if (!cleanEmail || !password) {
+    alert('Please enter your email and password')
+    return
+  }
+
+  setLoading(true)
+
+  try {
+    const { error } = await supabase.auth.signInWithPassword({
+      email: cleanEmail,
+      password,
+    })
+
+    if (error) {
+      alert(error.message)
       return
     }
 
-    setLoading(true)
-
-    try {
-      const { error } = await supabase.auth.signInWithPassword({
-        email: cleanEmail,
-        password,
-      })
-
-      if (error) {
-        alert(error.message)
-        return
-      }
-
-      router.push('/dashboard')
-    } catch (error) {
-      console.error('Login error:', error)
-      alert('Login failed. Please try again.')
-    } finally {
-      setLoading(false)
-    }
+    router.push('/dashboard')
+  } catch (error) {
+    console.error('Login error:', error)
+    alert('Login failed. Please try again.')
+  } finally {
+    setLoading(false)
   }
+}
 
   return (
     <div className="min-h-screen flex items-center justify-center px-6">
@@ -61,12 +63,12 @@ export default function LoginPage() {
           Sign in to Tynato CRM
         </p>
 
-        <div className="space-y-5">
+        <form onSubmit={login} className="space-y-5">
           <div>
             <label className="block mb-2">
               Email
             </label>
-
+          
             <input
               type="email"
               value={email}
@@ -93,12 +95,12 @@ export default function LoginPage() {
           </div>
 
           <button
-            onClick={login}
-            disabled={loading}
-            className="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-4 rounded-lg transition"
-          >
-            {loading ? 'Signing In...' : 'Login'}
-          </button>
+  type="submit"
+  disabled={loading}
+  className="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-4 rounded-lg transition"
+>
+  {loading ? 'Signing In...' : 'Login'}
+</button>
 
           {/* Registration link */}
           <p
@@ -114,7 +116,7 @@ export default function LoginPage() {
               Register here
             </button>
           </p>
-        </div>
+        </form>
       </div>
     </div>
   )

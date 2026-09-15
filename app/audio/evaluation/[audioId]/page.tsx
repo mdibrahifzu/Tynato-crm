@@ -600,8 +600,7 @@ export default function AudioEvaluationDetailPage() {
                 </p>
 
                 <p className="mt-1 font-semibold">
-                  {evaluation.model_name ||
-                    'Pending'}
+                  TYNATO AI
                 </p>
               </div>
             </div>

@@ -5,28 +5,26 @@ import requests
 
 from app.schemas.invoice import InvoiceRequest
 
+INVOICE_API_URL = "http://127.0.0.1:8001/generate"
 
-INVOICE_GENERATOR_URL = (
-    "https://invoice-generator.com"
-)
-
-INVOICE_GENERATOR_API_KEY = os.getenv(
-    "INVOICE_GENERATOR_API_KEY"
-)
+_CURRENCY_SYMBOLS = {
+    "INR": "₹",
+    "USD": "$",
+    "EUR": "€",
+    "GBP": "£",
+}
 
 
 class InvoiceGenerationError(Exception):
     pass
 
 
-def _build_payload(
-    invoice: InvoiceRequest,
-) -> Dict[str, Any]:
+def _build_payload(invoice: InvoiceRequest) -> Dict[str, Any]:
     payload: Dict[str, Any] = {
-        "from": invoice.from_address,
-        "to": invoice.to_address,
+        "from": invoice.from_address or "",
+        "to": invoice.to_address or "",
         "number": invoice.number,
-        "currency": invoice.currency,
+        "currency_symbol": _CURRENCY_SYMBOLS.get(invoice.currency, "₹"),
         "items": [
             {
                 "name": item.name,
@@ -37,81 +35,55 @@ def _build_payload(
         ],
     }
 
+    if invoice.logo_url:
+        payload["logo"] = invoice.logo_url
     if invoice.invoice_date:
-        payload["date"] = (
-            invoice.invoice_date.isoformat()
-        )
-
+        payload["date"] = invoice.invoice_date.isoformat()
     if invoice.due_date:
-        payload["due_date"] = (
-            invoice.due_date.isoformat()
-        )
-
+        payload["due_date"] = invoice.due_date.isoformat()
+    if invoice.tax_title:
+        payload["tax_title"] = invoice.tax_title
+    if invoice.tax_percent is not None:
+        payload["tax_percent"] = float(invoice.tax_percent)
     if invoice.notes:
         payload["notes"] = invoice.notes
+    if invoice.terms:
+        payload["terms"] = invoice.terms
 
     return payload
 
 
-def generate_invoice_pdf(
-    invoice: InvoiceRequest,
-) -> bytes:
-    if not INVOICE_GENERATOR_API_KEY:
-        raise InvoiceGenerationError(
-            "Invoice Generator API key is not configured."
-        )
-
-    payload = _build_payload(invoice)
+def generate_invoice_pdf(invoice: InvoiceRequest) -> bytes:
+    api_key = os.getenv("INVOICE_API_KEY")
+    if not api_key:
+        raise InvoiceGenerationError("Invoice API key is not configured.")
 
     try:
         response = requests.post(
-            INVOICE_GENERATOR_URL,
+            INVOICE_API_URL,
             headers={
-                "Authorization": (
-                    "Bearer "
-                    f"{INVOICE_GENERATOR_API_KEY}"
-                ),
+                "X-API-Key": api_key,
                 "Content-Type": "application/json",
-                "Accept": "application/pdf",
             },
-            json=payload,
-            timeout=30,
+            json=_build_payload(invoice),
+            timeout=15,
         )
     except requests.RequestException as exc:
-        raise InvoiceGenerationError(
-            "Unable to connect to Invoice Generator."
-        ) from exc
+        raise InvoiceGenerationError("Unable to connect to Invoice API.") from exc
 
     if not response.ok:
         try:
             error_body = response.json()
         except ValueError:
             error_body = {}
-
-        message = (
-            error_body.get("message")
-            or error_body.get("error")
-            or "Invoice generation failed."
-        )
-
         raise InvoiceGenerationError(
-            str(message)
+            str(error_body.get("detail") or "Invoice generation failed.")
         )
 
-    content_type = (
-        response.headers
-        .get("Content-Type", "")
-        .lower()
-    )
-
+    content_type = response.headers.get("Content-Type", "").lower()
     if "application/pdf" not in content_type:
-        raise InvoiceGenerationError(
-            "Invoice Generator returned an unexpected response."
-        )
-
+        raise InvoiceGenerationError("Invoice API returned an unexpected response.")
     if not response.content:
-        raise InvoiceGenerationError(
-            "Invoice Generator returned an empty PDF."
-        )
+        raise InvoiceGenerationError("Invoice API returned an empty PDF.")
 
     return response.content
