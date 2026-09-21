@@ -102,7 +102,14 @@ export default function SearchPage() {
           >
             Search Query
           </label>
-
+          <form
+  onSubmit={(e) => {
+    e.preventDefault()
+    if (!loading) {
+      searchLeads()
+    }
+  }}
+>
           <input
             className="w-full p-4 rounded-lg border"
             placeholder="e.g. schools in trichy"
@@ -125,7 +132,7 @@ export default function SearchPage() {
             disabled={loading}
           >
             {loading ? 'Searching...' : 'Search Leads'}
-          </button>
+          </button></form>
 
           {showUpgrade && (
             <div className="mt-6 rounded-lg border border-yellow-500/30 bg-yellow-500/10 p-5">

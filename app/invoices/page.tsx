@@ -264,7 +264,11 @@ const updateItem = (
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          lead_id: customerMode === 'lead' ? selectedLeadId : null,
+  lead_id: null,
+  custom_lead_id:
+    customerMode === 'lead'
+      ? selectedLeadId
+      : null,
           customer_name: customerName.trim() || null,
           company_name: companyName.trim() || null,
           customer_phone: customerPhone.trim() || null,

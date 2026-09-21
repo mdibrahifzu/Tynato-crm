@@ -2,6 +2,7 @@
 
 import Sidebar from '../components/Sidebar'
 import { useEffect, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { apiFetch } from '@/app/lib/api'
 
 const SOURCE_COLUMNS = [
@@ -110,6 +111,7 @@ function formatDate(
 }
 
 export default function CustomLeadPage() {
+  const router = useRouter()
   const [file, setFile] =
     useState<File | null>(null)
 
@@ -403,6 +405,67 @@ export default function CustomLeadPage() {
       setSaving(null)
     }
   }
+  async function deleteCustomLead(
+  lead: CustomLead
+) {
+  const leadName =
+    lead.full_name ||
+    lead.phone_number ||
+    lead.email ||
+    'this lead'
+
+  const confirmed = window.confirm(
+    `Delete ${leadName}?\n\n` +
+      `This will remove the lead from Custom Leads. ` +
+      `Existing audio recordings and evaluations will be preserved.`
+  )
+
+  if (!confirmed) {
+    return
+  }
+
+  try {
+    setSaving(lead.id)
+    setMessage('')
+
+    const response = await apiFetch(
+      `/custom-leads/${lead.id}`,
+      {
+        method: 'DELETE',
+      }
+    )
+
+    const data = await response
+      .json()
+      .catch(() => null)
+
+    if (!response.ok) {
+      throw new Error(
+        data?.detail ||
+          'Failed to delete custom lead.'
+      )
+    }
+
+    setLeads((previous) =>
+      previous.filter(
+        (item) => item.id !== lead.id
+      )
+    )
+
+    setMessage(
+      'Custom lead deleted successfully.'
+    )
+  } catch (error: any) {
+    console.error(error)
+
+    setMessage(
+      error?.message ||
+        'Delete failed.'
+    )
+  } finally {
+    setSaving(null)
+  }
+}
 
   return (
     <div className="flex min-h-screen">
@@ -703,7 +766,9 @@ export default function CustomLeadPage() {
                     <th className="p-4 text-left whitespace-nowrap">
                       Actions
                     </th>
+                    
                   </tr>
+                  
                 </thead>
 
                 <tbody>
@@ -854,32 +919,73 @@ export default function CustomLeadPage() {
                           </td>
 
                           <td className="p-4">
-                            <button
-                              type="button"
-                              onClick={() =>
-                                updateCustomLead(
-                                  lead
-                                )
-                              }
-                              disabled={
-                                saving ===
-                                lead.id
-                              }
-                              className="
-                                bg-blue-600
-                                hover:bg-blue-700
-                                disabled:opacity-50
-                                text-white
-                                px-4
-                                py-2
-                                rounded-lg
-                              "
-                            >
-                              {saving === lead.id
-                                ? 'Saving...'
-                                : 'Update'}
-                            </button>
-                          </td>
+  <div className="flex flex-wrap items-center gap-2">
+
+  <button
+    type="button"
+    onClick={() =>
+      router.push(
+        `/audio?custom_lead_id=${lead.id}`
+      )
+    }
+    className="
+      rounded-lg
+      border
+      border-violet-500/30
+      bg-violet-500/10
+      px-4
+      py-2
+      text-violet-300
+      hover:bg-violet-500/20
+    "
+  >
+    🎙️ Audio
+  </button>
+
+  <button
+    type="button"
+    onClick={() =>
+      updateCustomLead(lead)
+    }
+    disabled={saving === lead.id}
+    className="
+      rounded-lg
+      bg-blue-600
+      px-4
+      py-2
+      text-white
+      hover:bg-blue-700
+      disabled:opacity-50
+    "
+  >
+    {saving === lead.id
+      ? 'Saving...'
+      : 'Update'}
+  </button>
+
+  <button
+    type="button"
+    onClick={() =>
+      deleteCustomLead(lead)
+    }
+    disabled={saving === lead.id}
+    className="
+      rounded-lg
+      border
+      border-rose-500/30
+      bg-rose-500/10
+      px-4
+      py-2
+      text-rose-300
+      hover:bg-rose-500/20
+      disabled:opacity-50
+    "
+  >
+    Delete
+  </button>
+
+</div>
+</td>
 
                         </tr>
                       )

@@ -79,56 +79,80 @@ export default function UsersPage() {
 
 
   async function loadPage() {
-    try {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser()
+  try {
+    setLoading(true)
 
-      if (!user) {
-        router.replace('/login')
-        return
-      }
+    const {
+      data: { session },
+      error: sessionError,
+    } = await supabase.auth.getSession()
 
+    if (sessionError) {
+      console.error(
+        'Failed to restore session:',
+        sessionError,
+      )
 
-      const {
-        data: profile,
-        error: profileError,
-      } = await supabase
-        .from('profiles')
-        .select('role')
-        .eq('id', user.id)
-        .single()
-
-
-      if (profileError) {
-        console.error(profileError)
-        router.replace('/dashboard')
-        return
-      }
-
-
-      if (profile?.role === 'admin') {
-        setIsAdmin(true)
-
-        await loadAdminUsers()
-        setLoading(false)
-
-        return
-      }
-
-
-      // Normal user
-      setIsAdmin(false)
-
-      await loadTeamData()
-
-    } catch (error) {
-      console.error('Users page error:', error)
-      router.replace('/dashboard')
-    } finally {
-      setLoading(false)
+      router.replace('/login')
+      return
     }
+
+    if (!session?.user) {
+      router.replace('/login')
+      return
+    }
+
+    const {
+      data: profile,
+      error: profileError,
+    } = await supabase
+      .from('profiles')
+      .select('role')
+      .eq('id', session.user.id)
+      .single()
+
+    if (profileError) {
+      console.error(
+        'Failed to load profile:',
+        profileError,
+      )
+
+      router.replace('/dashboard')
+      return
+    }
+
+    if (profile?.role === 'admin') {
+      setIsAdmin(true)
+
+      await loadAdminUsers()
+
+      return
+    }
+
+    setIsAdmin(false)
+
+    await loadTeamData()
+  } catch (error) {
+    console.error(
+      'Users page error:',
+      error,
+    )
+
+    /*
+     * Only redirect when authentication is actually
+     * unavailable. Do not redirect because one
+     * secondary API request failed.
+     */
+    if (
+      error instanceof Error &&
+      error.message.includes('401')
+    ) {
+      router.replace('/login')
+    }
+  } finally {
+    setLoading(false)
   }
+}
 
 
   async function loadAdminUsers() {
@@ -222,20 +246,44 @@ await loadInvitations()
 
 
   async function loadInvitations() {
+  try {
     const response = await apiFetch(
       '/team/invitations'
     )
 
+    const data =
+      await response.json().catch(() => null)
+
+    if (response.status === 401) {
+      /*
+       * Authentication is handled centrally.
+       * Do not crash the whole Users page here.
+       */
+      setInvitations([])
+      return
+    }
+
     if (!response.ok) {
       throw new Error(
-        `Failed to load invitations: ${response.status}`
+        data?.detail ||
+          `Failed to load invitations: ${response.status}`,
       )
     }
 
-    const data = await response.json()
+    setInvitations(
+      Array.isArray(data)
+        ? data
+        : [],
+    )
+  } catch (error) {
+    console.error(
+      'Failed to load invitations:',
+      error,
+    )
 
-    setInvitations(data || [])
+    setInvitations([])
   }
+}
 
 
   async function createTeam() {

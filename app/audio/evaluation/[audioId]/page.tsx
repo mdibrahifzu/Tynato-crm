@@ -101,6 +101,7 @@ type EvaluationAnalysis = {
 type Evaluation = {
   id: string
   audio_id: string
+  custom_lead_id: string | null
   status:
     | 'pending'
     | 'processing'
@@ -120,6 +121,7 @@ type Evaluation = {
 type HistoryItem = {
   id: string
   audio_id: string
+  custom_lead_id: string | null
   client_name: string | null
   performance_score: number | null
   summary: string | null
@@ -232,119 +234,159 @@ export default function AudioEvaluationDetailPage() {
     }
   }, [router])
 
-  const loadEvaluation = useCallback(
-    async (showLoader = true) => {
-      if (!audioId) return
-
-      if (showLoader) {
-        setLoading(true)
-      }
-
-      try {
-        setError('')
-
-        const response = await apiFetch(
-          `/audio/${audioId}/evaluation`
-        )
-
-        const data = await response
-          .json()
-          .catch(() => null)
-
-        if (!response.ok) {
-          throw new Error(
-            typeof data?.detail === 'string'
-              ? data.detail
-              : response.status === 404
-                ? 'This recording has not been evaluated yet.'
-                : 'Failed to load evaluation.'
-          )
-        }
-
-        setEvaluation(data)
-
-        const historyResponse = await apiFetch(
-          '/audio/evaluations/history?limit=20'
-        )
-
-        if (historyResponse.ok) {
-          const historyData =
-            await historyResponse
-              .json()
-              .catch(() => [])
-
-          setHistory(
-            Array.isArray(historyData)
-              ? historyData
-              : []
-          )
-        } else {
-          setHistory([])
-        }
-
-        return data as Evaluation
-      } catch (err) {
-        setError(
-          err instanceof Error
-            ? err.message
-            : 'Failed to load evaluation.'
-        )
-        return null
-      } finally {
-        if (showLoader) {
-          setLoading(false)
-        }
-      }
-    },
-    [audioId]
-  )
-
-  useEffect(() => {
-    if (!authChecking && audioId) {
-      loadEvaluation()
+const loadHistory = useCallback(
+  async (customLeadId: string | null) => {
+    if (!customLeadId) {
+      setHistory([])
+      return
     }
-  }, [
-    authChecking,
-    audioId,
-    loadEvaluation,
-  ])
 
-  useEffect(() => {
-    if (
-      !evaluation ||
-      !(
-        evaluation.status === 'pending' ||
-        evaluation.status === 'processing'
+    try {
+      const params = new URLSearchParams({
+        limit: '100',
+        custom_lead_id: customLeadId,
+      })
+
+      const historyResponse = await apiFetch(
+        `/audio/evaluations/history?${params.toString()}`
       )
+
+      if (!historyResponse.ok) {
+        setHistory([])
+        return
+      }
+
+      const historyData = await historyResponse
+        .json()
+        .catch(() => [])
+
+      setHistory(
+        Array.isArray(historyData)
+          ? historyData
+          : []
+      )
+    } catch {
+      setHistory([])
+    }
+  },
+  []
+)
+
+const loadEvaluation = useCallback(
+  async (showLoader = true) => {
+    if (!audioId) return null
+
+    if (showLoader) {
+      setLoading(true)
+    }
+
+    try {
+      setError('')
+
+      const response = await apiFetch(
+        `/audio/${audioId}/evaluation`
+      )
+
+      const data = await response
+        .json()
+        .catch(() => null)
+
+      if (!response.ok) {
+        throw new Error(
+          typeof data?.detail === 'string'
+            ? data.detail
+            : response.status === 404
+              ? 'This recording has not been evaluated yet.'
+              : 'Failed to load evaluation.'
+        )
+      }
+
+      const normalized = data as Evaluation
+
+      setEvaluation(normalized)
+
+      await loadHistory(
+        normalized.custom_lead_id ?? null
+      )
+
+      return normalized
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : 'Failed to load evaluation.'
+      )
+
+      return null
+    } finally {
+      if (showLoader) {
+        setLoading(false)
+      }
+    }
+  },
+  [audioId, loadHistory]
+)
+
+useEffect(() => {
+  if (!authChecking && audioId) {
+    loadEvaluation()
+  }
+}, [
+  authChecking,
+  audioId,
+  loadEvaluation,
+])
+
+useEffect(() => {
+  if (
+    !evaluation ||
+    !(
+      evaluation.status === 'pending' ||
+      evaluation.status === 'processing'
+    )
+  ) {
+    setPolling(false)
+    return
+  }
+
+  let cancelled = false
+  let timer: number | undefined
+
+  setPolling(true)
+
+  const poll = async () => {
+    if (cancelled) return
+
+    const result = await loadEvaluation(false)
+
+    if (cancelled) return
+
+    if (
+      result &&
+      result.status !== 'pending' &&
+      result.status !== 'processing'
     ) {
       setPolling(false)
       return
     }
 
-    setPolling(true)
+    timer = window.setTimeout(poll, 5000)
+  }
 
-    const timer = window.setInterval(
-      async () => {
-        const result =
-          await loadEvaluation(false)
+  poll()
 
-        if (
-          result &&
-          result.status !== 'pending' &&
-          result.status !== 'processing'
-        ) {
-          window.clearInterval(timer)
-          setPolling(false)
-        }
-      },
-      3000
-    )
+  return () => {
+    cancelled = true
+    setPolling(false)
 
-    return () => {
-      window.clearInterval(timer)
-      setPolling(false)
+    if (timer !== undefined) {
+      window.clearTimeout(timer)
     }
-  }, [evaluation?.status, loadEvaluation])
+  }
+}, [
+  evaluation?.status,
+  loadEvaluation,
+])
 
   const scoreItems = useMemo(() => {
     if (
@@ -380,7 +422,7 @@ export default function AudioEvaluationDetailPage() {
     })
   }, [evaluation])
 
-  const historyPoints = useMemo(() => {
+    const historyPoints = useMemo(() => {
     const points = [...history]
 
     if (
@@ -393,6 +435,8 @@ export default function AudioEvaluationDetailPage() {
       points.push({
         id: evaluation.id,
         audio_id: evaluation.audio_id,
+        custom_lead_id:
+          evaluation.custom_lead_id,
         client_name: evaluation.client_name,
         performance_score:
           evaluation.performance_score,
@@ -605,6 +649,30 @@ export default function AudioEvaluationDetailPage() {
               </div>
             </div>
           </header>
+
+          {evaluation.custom_lead_id && (
+            <section className="mb-7 rounded-2xl border border-violet-400/10 bg-violet-500/[0.05] p-5">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <p className="text-xs font-medium uppercase tracking-wider text-violet-300">
+                    Lead Performance History
+                  </p>
+                  <p className="mt-1 text-sm text-white/50">
+                    This evaluation is connected to the same Custom Lead as the previous calls.
+                  </p>
+                </div>
+
+                <div className="text-right">
+                  <p className="text-2xl font-bold">
+                    {history.length}
+                  </p>
+                  <p className="text-xs text-white/30">
+                    completed call{history.length === 1 ? '' : 's'}
+                  </p>
+                </div>
+              </div>
+            </section>
+          )}
 
           {isProcessing && (
             <section className="mb-7 rounded-2xl border border-blue-400/20 bg-blue-400/[0.06] p-6">

@@ -4,6 +4,7 @@ import Sidebar from '../components/Sidebar'
 import { useEffect, useState } from 'react'
 import { apiFetch } from '@/app/lib/api'
 
+
 interface Lead {
   id: string
   business_name: string
@@ -62,8 +63,8 @@ function StatusBadge({ status }: { status?: string }) {
     </span>
   )
 }
+function LeadsContent() {
 
-export default function LeadsPage() {
   const [leads, setLeads] = useState<Lead[]>([])
   const [loading, setLoading] = useState(true)
 
@@ -211,19 +212,20 @@ export default function LeadsPage() {
     }
   }
 
-  if (loading) {
-    return (
-      <div className="flex min-h-screen">
-        <Sidebar />
+if (loading) {
+  return (
+    <div className="flex min-h-screen">
+      <Sidebar />
 
-        <main className="flex-1 p-10">
-          <div className="text-lg">
-            Loading Leads...
-          </div>
-        </main>
-      </div>
-    )
-  }
+      <main className="flex-1 p-10">
+        <div className="flex items-center justify-center min-h-[60vh]">
+          <p className="text-gray-400">Loading leads...</p>
+        </div>
+      </main>
+    </div>
+  )
+}
+
 
   return (
     <div className="flex min-h-screen">
@@ -528,3 +530,5 @@ export default function LeadsPage() {
     </div>
   )
 }
+
+export default LeadsContent

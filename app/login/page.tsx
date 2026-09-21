@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '../lib/supabase'
+import { superAdminAccessCheck } from '../lib/api'
 
 export default function LoginPage() {
   const router = useRouter()
@@ -28,6 +29,30 @@ async function login(e: React.FormEvent<HTMLFormElement>) {
       email: cleanEmail,
       password,
     })
+
+  const { data: sessionData } =
+  await supabase.auth.getSession()
+
+if (!sessionData.session) {
+  alert('Login succeeded, but no active session was found.')
+  return
+}
+
+try {
+  const result = await superAdminAccessCheck()
+
+  if (
+    result.success &&
+    result.platform_role === 'super_admin'
+  ) {
+    router.replace('/super-admin')
+    return
+  }
+} catch {
+  // A normal CRM user should continue to the CRM.
+}
+
+router.replace('/dashboard')
 
     if (error) {
       alert(error.message)

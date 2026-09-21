@@ -2,61 +2,51 @@
 
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
-import { useEffect, useState } from 'react'
 import { supabase } from '@/app/lib/supabase'
 
 const menus = [
-  { label: 'Dashboard', href: '/dashboard', icon: '⌂' },
-  { label: 'Leads', href: '/leads', icon: '◉' },
-  { label: 'Custom Lead', href: '/custom-lead', icon: '＋' },
-  { label: 'Find Leads', href: '/search', icon: '⌕' },
-  { label: 'Upload Audio', href: '/audio', icon: '◒' },
-  { label: 'Invoices', href: '/invoices', icon: '▣' },
   {
-    label: 'Search History',
-    href: '/search_history',
+    label: 'Dashboard',
+    href: '/super-admin',
+    icon: '⌂',
+  },
+  {
+    label: 'Organizations',
+    href: '/super-admin/organizations',
+    icon: '▦',
+  },
+  {
+    label: 'Modules',
+    href: '/super-admin/modules',
+    icon: '◈',
+  },
+  {
+    label: 'Users',
+    href: '/super-admin/users',
+    icon: '♙',
+  },
+  {
+    label: 'Audit Logs',
+    href: '/super-admin/audit-logs',
     icon: '◷',
   },
-  { label: 'Users', href: '/users', icon: '♙' },
-  { label: 'Settings', href: '/settings', icon: '⚙' },
+  // {
+  //   label: 'System Health',
+  //   href: '/super-admin/system-health',
+  //   icon: '⌁',
+  // },
 ]
 
-export default function Sidebar() {
+export default function SuperAdminSidebar() {
   const pathname = usePathname()
   const router = useRouter()
 
-  const [isAdmin, setIsAdmin] = useState(false)
-
-  useEffect(() => {
-    async function loadRole() {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser()
-
-      if (!user) {
-        setIsAdmin(false)
-        return
-      }
-
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('role')
-        .eq('id', user.id)
-        .single()
-
-      setIsAdmin(profile?.role === 'admin')
-    }
-
-    loadRole()
-  }, [])
-
   async function handleLogout() {
-    const { error } =
-      await supabase.auth.signOut()
+    const { error } = await supabase.auth.signOut()
 
     if (error) {
       console.error(
-        'Logout failed:',
+        'Super Admin logout failed:',
         error,
       )
       return
@@ -69,35 +59,26 @@ export default function Sidebar() {
     <aside
       className="
         sticky top-0
-        flex h-screen w-[250px]
-        shrink-0 flex-col
+        flex h-screen w-[250px] shrink-0 flex-col
         border-r border-white/10
         p-4
         max-lg:w-[86px]
         max-lg:px-3
       "
-      style={{
-        background: 'var(--bg-sidebar)',
-      }}
+      style={{ background: 'var(--bg-sidebar)' }}
     >
       {/* Brand */}
       <Link
-        href="/dashboard"
+        href="/super-admin"
         className="mb-7 flex items-center gap-3 px-2 py-2"
       >
         <span
           className="
-            flex h-10 w-10
-            items-center justify-center
+            flex h-10 w-10 items-center justify-center
             rounded-xl
-            bg-gradient-to-br
-            from-blue-500
-            to-violet-600
-            text-base
-            font-black
-            text-white
-            shadow-lg
-            shadow-blue-600/20
+            bg-gradient-to-br from-blue-500 to-violet-600
+            text-base font-black text-white
+            shadow-lg shadow-blue-600/20
           "
         >
           T
@@ -105,24 +86,41 @@ export default function Sidebar() {
 
         <span className="max-lg:hidden">
           <span className="block text-lg font-bold tracking-tight text-white">
-            Tynato CRM
+            Tynato
           </span>
 
-          <span className="block text-[10px] uppercase tracking-[0.18em] text-slate-400">
-            Sales Workspace
+          <span className="block text-[10px] uppercase tracking-[0.18em] text-blue-300">
+            Super Admin
           </span>
         </span>
       </Link>
+
+      {/* Platform indicator */}
+      <div className="mb-4 max-lg:hidden">
+        <div
+          className="
+            flex items-center gap-2
+            rounded-xl
+            border border-white/5
+            bg-white/[0.03]
+            px-3 py-2
+          "
+        >
+          <span className="h-2 w-2 rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.7)]" />
+
+          <span className="text-[10px] font-medium uppercase tracking-[0.16em] text-slate-500">
+            Platform Console
+          </span>
+        </div>
+      </div>
 
       {/* Navigation */}
       <nav className="flex-1 space-y-1">
         {menus.map((menu) => {
           const active =
-            pathname === menu.href ||
-            (menu.href === '/audio' &&
-              pathname.startsWith(
-                '/audio/evaluation/',
-              ))
+            menu.href === '/super-admin'
+              ? pathname === '/super-admin'
+              : pathname.startsWith(menu.href)
 
           return (
             <Link
@@ -131,8 +129,7 @@ export default function Sidebar() {
               className={`
                 group flex items-center gap-3
                 rounded-xl px-3 py-3
-                text-sm font-medium
-                transition
+                text-sm font-medium transition
                 max-lg:justify-center
                 ${
                   active
@@ -143,8 +140,7 @@ export default function Sidebar() {
             >
               <span
                 className={`
-                  flex h-8 w-8 shrink-0
-                  items-center justify-center
+                  flex h-8 w-8 shrink-0 items-center justify-center
                   rounded-lg text-base
                   ${
                     active
@@ -164,12 +160,16 @@ export default function Sidebar() {
         })}
       </nav>
 
-      {/* Footer */}
+      {/* Super Admin account */}
       <div className="mt-4 border-t border-white/10 pt-4">
-        <div className="mb-3 hidden rounded-xl bg-white/[0.04] px-3 py-2 text-[10px] uppercase tracking-wider text-slate-500 max-lg:hidden">
-          {isAdmin
-            ? 'Administrator'
-            : 'Sales Workspace'}
+        <div className="mb-3 hidden rounded-xl bg-white/[0.04] px-3 py-2 max-lg:hidden">
+          <div className="text-[10px] uppercase tracking-[0.15em] text-slate-500">
+            Access Level
+          </div>
+
+          <div className="mt-1 text-xs font-semibold text-purple-300">
+            Super Administrator
+          </div>
         </div>
 
         <button
@@ -187,8 +187,7 @@ export default function Sidebar() {
         >
           <span
             className="
-              flex h-8 w-8
-              items-center justify-center
+              flex h-8 w-8 items-center justify-center
               rounded-lg
               bg-rose-500/10
               text-rose-300

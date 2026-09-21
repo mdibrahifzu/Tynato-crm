@@ -7,11 +7,18 @@ import { apiFetch } from '@/app/lib/api'
 
 type AudioItem = {
   id: string
+  custom_lead_id?: string | null
   original_filename: string
   file_size: number
-  status: 'uploaded' | 'processing' | 'completed' | 'failed'
+  status:
+    | 'uploaded'
+    | 'processing'
+    | 'completed'
+    | 'failed'
   created_at: string
   updated_at: string
+  lead_name?: string | null
+  lead_phone?: string | null
   summary?: string | null
 }
 
@@ -36,19 +43,34 @@ function formatDate(value: string) {
 
 export default function AudioEvaluationPage() {
   const router = useRouter()
-
+  const [customLeadId, setCustomLeadId] = useState('')
   const [items, setItems] = useState<AudioItem[]>([])
   const [loading, setLoading] = useState(true)
   const [evaluatingId, setEvaluatingId] =
     useState<string | null>(null)
   const [error, setError] = useState('')
 
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    setCustomLeadId(params.get('custom_lead_id') ?? '')
+  }, [])
+
   const loadAudio = useCallback(async () => {
     try {
       setError('')
+      setLoading(true)
+
+      const params = new URLSearchParams({
+        limit: '50',
+        offset: '0',
+      })
+
+      if (customLeadId) {
+        params.set('custom_lead_id', customLeadId)
+      }
 
       const response = await apiFetch(
-        '/audio?limit=50&offset=0'
+        `/audio?${params.toString()}`
       )
 
       const body = await response
@@ -69,18 +91,17 @@ export default function AudioEvaluationPage() {
           ? err.message
           : 'Failed to load recordings.'
       )
+      setItems([])
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [customLeadId])
 
   useEffect(() => {
     loadAudio()
   }, [loadAudio])
 
-  const evaluateAudio = async (
-    audioId: string
-  ) => {
+  const evaluateAudio = async (audioId: string) => {
     if (evaluatingId) return
 
     setEvaluatingId(audioId)
@@ -143,14 +164,38 @@ export default function AudioEvaluationPage() {
             </p>
 
             <h1 className="mt-2 text-3xl font-bold tracking-tight sm:text-4xl">
-              Call Evaluation
+              {customLeadId
+                ? 'Lead Call Evaluation'
+                : 'Call Evaluation'}
             </h1>
 
             <p className="mt-2 max-w-2xl text-sm leading-6 text-white/50 sm:text-base">
-              Select a completed sales call to run the
-              AI performance evaluation.
+              {customLeadId
+                ? 'Select a completed call for this lead to run the AI performance evaluation.'
+                : 'Select a completed sales call to run the AI performance evaluation.'}
             </p>
           </div>
+
+          {customLeadId && (
+            <div className="mb-6 flex flex-col gap-3 rounded-2xl border border-violet-400/10 bg-violet-500/[0.05] p-4 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className="text-xs font-medium uppercase tracking-wider text-violet-300">
+                  Lead-specific evaluations
+                </p>
+                <p className="mt-1 text-sm text-white/55">
+                  Only recordings linked to the selected Custom Lead are shown.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => router.replace('/audio/evaluation')}
+                className="w-fit rounded-lg border border-white/10 px-3 py-2 text-sm hover:bg-white/5"
+              >
+                Show All Calls
+              </button>
+            </div>
+          )}
 
           {error && (
             <div className="mb-6 rounded-xl border border-rose-400/10 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
@@ -165,12 +210,13 @@ export default function AudioEvaluationPage() {
           ) : completedCalls.length === 0 ? (
             <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-10 text-center">
               <div className="text-lg font-semibold">
-                No completed recordings
+                {customLeadId
+                  ? 'No completed recordings for this lead'
+                  : 'No completed recordings'}
               </div>
 
               <p className="mt-2 text-sm text-white/45">
-                Upload a call recording and wait until
-                processing is complete before evaluating it.
+                Upload a call recording and wait until processing is complete before evaluating it.
               </p>
 
               <button
@@ -193,6 +239,15 @@ export default function AudioEvaluationPage() {
                       <h2 className="truncate text-base font-semibold">
                         {item.original_filename}
                       </h2>
+
+                      {item.custom_lead_id && (
+                        <p className="mt-2 text-xs text-violet-300">
+                          Lead: {item.lead_name || 'Unnamed Lead'}
+                          {item.lead_phone
+                            ? ` · ${item.lead_phone}`
+                            : ''}
+                        </p>
+                      )}
 
                       <p className="mt-1 text-xs text-white/35">
                         {formatBytes(item.file_size)} ·{' '}
