@@ -563,48 +563,90 @@ function AudioPageContent() {
     }
   }
 
-  const evaluateAudio = async (
-    audioId: string
-  ) => {
-    if (evaluatingId) return
+  const evaluateAudio = async (audioId: string) => {
+  if (evaluatingId) return
 
-    setEvaluatingId(audioId)
-    setError('')
-    setMessage('Starting AI evaluation…')
+  setEvaluatingId(audioId)
+  setError('')
+  setMessage('Starting AI evaluation…')
 
-    try {
-      const response = await apiFetch(
-        `/audio/${audioId}/evaluate`,
-        {
-          method: 'POST',
-        }
+  try {
+    const response = await apiFetch(`/audio/${audioId}/evaluate`, {
+      method: 'POST',
+    })
+
+    const body = await response.json().catch(() => null)
+
+    if (!response.ok) {
+      throw new Error(
+        body?.detail || `Evaluation failed: ${response.status}`
       )
+    }
 
-      const body = await response
-        .json()
-        .catch(() => null)
+    if (body?.status === 'completed') {
+      setEvaluatingId(null)
+      setMessage('')
+      router.push(`/audio/evaluation/${audioId}`)
+      return
+    }
+
+    setMessage('AI evaluation in progress…')
+    pollEvaluation(audioId)
+  } catch (err) {
+    setError(
+      err instanceof Error
+        ? err.message
+        : 'Unable to start AI evaluation.'
+    )
+    setMessage('')
+    setEvaluatingId(null)
+  }
+}
+
+const pollEvaluation = (audioId: string) => {
+  let timer: number
+
+  const poll = async () => {
+    try {
+      const response = await apiFetch(`/audio/${audioId}/evaluation`)
+      const evaluation = await response.json().catch(() => null)
 
       if (!response.ok) {
         throw new Error(
-          body?.detail ||
-            `Evaluation failed: ${response.status}`
+          evaluation?.detail || 'Unable to check evaluation status.'
         )
       }
 
-      router.push(
-        `/audio/evaluation/${audioId}`
-      )
+      if (evaluation.status === 'completed') {
+        setEvaluatingId(null)
+        setMessage('')
+        router.push(`/audio/evaluation/${audioId}`)
+        return
+      }
+
+      if (evaluation.status === 'failed') {
+        setEvaluatingId(null)
+        setError(
+          evaluation.error_message || 'AI evaluation failed.'
+        )
+        setMessage('')
+        return
+      }
+
+      timer = window.setTimeout(poll, 3000)
     } catch (err) {
+      setEvaluatingId(null)
       setError(
         err instanceof Error
           ? err.message
-          : 'Unable to start AI evaluation.'
+          : 'Unable to check evaluation status.'
       )
       setMessage('')
-    } finally {
-      setEvaluatingId(null)
     }
   }
+
+  poll()
+}
 
   const deleteAudio = async (
     audioId: string

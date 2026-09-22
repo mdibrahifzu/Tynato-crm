@@ -16,10 +16,36 @@ export async function apiFetch(
       'Failed to get session:',
       error,
     )
+
+    const message = error.message.toLowerCase()
+    const isInvalidRefreshToken =
+      message.includes('invalid refresh token') ||
+      message.includes('refresh token not found') ||
+      message.includes('refresh token')
+
+    if (isInvalidRefreshToken) {
+      await supabase.auth.signOut({
+        scope: 'local',
+      })
+
+      if (typeof window !== 'undefined') {
+        window.location.replace('/login')
+      }
+    }
+
+    throw error
   }
 
   const token =
     data.session?.access_token
+
+  if (!token) {
+    if (typeof window !== 'undefined') {
+      window.location.replace('/login')
+    }
+
+    throw new Error('Not authenticated')
+  }
 
   const baseUrl =
     process.env.NEXT_PUBLIC_API_URL ||
@@ -31,18 +57,22 @@ export async function apiFetch(
       ...options,
       headers: {
         ...options.headers,
-        ...(token
-          ? {
-              Authorization: `Bearer ${token}`,
-            }
-          : {}),
+        Authorization: `Bearer ${token}`,
       },
     },
   )
 
-  if (res.status === 401 && token) {
-  window.location.href = '/login'
-}
+  if (res.status === 401) {
+    await supabase.auth.signOut({
+      scope: 'local',
+    })
+
+    if (typeof window !== 'undefined') {
+      window.location.replace('/login')
+    }
+
+    throw new Error('Session expired')
+  }
 
   return res
 }

@@ -156,3 +156,94 @@ td {
     border-radius: 16px;
   }
 }
+/* =========================================================
+   CLOUD THEME - FINAL READABILITY FIX
+   ========================================================= */
+
+[data-theme='cloud'] main {
+  color: var(--text-primary) !important;
+}
+
+/* Force readable text inside CRM content */
+[data-theme='cloud'] main p,
+[data-theme='cloud'] main span,
+[data-theme='cloud'] main label,
+[data-theme='cloud'] main div,
+[data-theme='cloud'] main h1,
+[data-theme='cloud'] main h2,
+[data-theme='cloud'] main h3,
+[data-theme='cloud'] main h4,
+[data-theme='cloud'] main h5,
+[data-theme='cloud'] main h6,
+[data-theme='cloud'] main td,
+[data-theme='cloud'] main th {
+  color: var(--text-primary);
+}
+
+/* Dark-theme Tailwind text utilities */
+[data-theme='cloud'] main [class*="text-white"] {
+  color: var(--text-primary) !important;
+}
+
+/* Muted text */
+[data-theme='cloud'] main [class*="text-white/50"],
+[data-theme='cloud'] main [class*="text-white/45"],
+[data-theme='cloud'] main [class*="text-white/40"],
+[data-theme='cloud'] main [class*="text-white/35"],
+[data-theme='cloud'] main [class*="text-white/30"] {
+  color: var(--text-muted) !important;
+}
+
+/* Keep action-button text white */
+[data-theme='cloud'] main button.bg-blue-600,
+[data-theme='cloud'] main button.bg-blue-500,
+[data-theme='cloud'] main button[class*="bg-blue-"] {
+  color: #ffffff !important;
+}
+
+/* Cards / secondary panels */
+[data-theme='cloud'] main [class*="bg-black/"],
+[data-theme='cloud'] main [class*="bg-white/"] {
+  background-color: var(--bg-surface) !important;
+}
+
+/* Borders */
+[data-theme='cloud'] main [class*="border-white/"] {
+  border-color: var(--border-soft) !important;
+}
+
+/* Inputs */
+[data-theme='cloud'] main input,
+[data-theme='cloud'] main textarea,
+[data-theme='cloud'] main select {
+  background: #ffffff !important;
+  color: #0f172a !important;
+  border: 1px solid rgba(15, 23, 42, 0.16) !important;
+  box-shadow: none !important;
+}
+
+[data-theme='cloud'] main input::placeholder,
+[data-theme='cloud'] main textarea::placeholder {
+  color: #64748b !important;
+}
+
+[data-theme='cloud'] main input:focus,
+[data-theme='cloud'] main textarea:focus,
+[data-theme='cloud'] main select:focus {
+  border-color: var(--accent) !important;
+  box-shadow: 0 0 0 3px var(--accent-soft) !important;
+}
+
+/* Disabled inputs */
+[data-theme='cloud'] main input:disabled,
+[data-theme='cloud'] main textarea:disabled,
+[data-theme='cloud'] main select:disabled {
+  background: #eef2f7 !important;
+  color: #64748b !important;
+}
+
+/* Visible cards */
+[data-theme='cloud'] main .crm-card,
+[data-theme='cloud'] main section {
+  border-color: var(--border-soft);
+}

@@ -13,60 +13,85 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false)
 
 async function login(e: React.FormEvent<HTMLFormElement>) {
-  e.preventDefault()
+    e.preventDefault()
 
-  const cleanEmail = email.trim().toLowerCase()
+    const cleanEmail = email.trim().toLowerCase()
 
-  if (!cleanEmail || !password) {
-    alert('Please enter your email and password')
-    return
-  }
-
-  setLoading(true)
-
-  try {
-    const { error } = await supabase.auth.signInWithPassword({
-      email: cleanEmail,
-      password,
-    })
-
-  const { data: sessionData } =
-  await supabase.auth.getSession()
-
-if (!sessionData.session) {
-  alert('Login succeeded, but no active session was found.')
-  return
-}
-
-try {
-  const result = await superAdminAccessCheck()
-
-  if (
-    result.success &&
-    result.platform_role === 'super_admin'
-  ) {
-    router.replace('/super-admin')
-    return
-  }
-} catch {
-  // A normal CRM user should continue to the CRM.
-}
-
-router.replace('/dashboard')
-
-    if (error) {
-      alert(error.message)
+    if (!cleanEmail || !password) {
+      alert('Please enter your email and password')
       return
     }
 
-    router.push('/dashboard')
-  } catch (error) {
-    console.error('Login error:', error)
-    alert('Login failed. Please try again.')
-  } finally {
-    setLoading(false)
+    if (loading) return
+
+    setLoading(true)
+
+    try {
+      // Clear only the browser's previous local session first.
+      // This prevents an old/rotated refresh token from interfering
+      // with the new login.
+      await supabase.auth.signOut({ scope: 'local' })
+
+      const { data, error } =
+        await supabase.auth.signInWithPassword({
+          email: cleanEmail,
+          password,
+        })
+
+      // Check the login result BEFORE calling any protected API.
+      if (error) {
+        alert(error.message)
+        return
+      }
+
+      if (!data.session?.access_token) {
+        alert(
+          'Login succeeded, but Supabase did not return an active session.',
+        )
+        return
+      }
+
+      // Explicitly persist the fresh session returned by sign-in.
+      const { error: setSessionError } =
+        await supabase.auth.setSession(data.session)
+
+      if (setSessionError) {
+        console.error(
+          'Failed to persist Supabase session:',
+          setSessionError,
+        )
+        alert(
+          'Login succeeded, but the session could not be saved. Please try again.',
+        )
+        return
+      }
+
+      try {
+        const result = await superAdminAccessCheck()
+
+        if (
+          result.success &&
+          result.platform_role === 'super_admin'
+        ) {
+          router.replace('/super-admin')
+          return
+        }
+      } catch {
+        // Normal CRM users continue to the regular dashboard.
+      }
+
+      router.replace('/dashboard')
+    } catch (error) {
+      console.error('Login error:', error)
+      alert(
+        error instanceof Error
+          ? error.message
+          : 'Login failed. Please try again.',
+      )
+    } finally {
+      setLoading(false)
+    }
   }
-}
 
   return (
     <div className="min-h-screen flex items-center justify-center px-6">
