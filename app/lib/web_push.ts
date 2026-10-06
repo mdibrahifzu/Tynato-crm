@@ -3,21 +3,22 @@ export type ApiFetch = (
   init?: RequestInit,
 ) => Promise<Response>
 
-function urlBase64ToUint8Array(value: string): Uint8Array {
-  const normalized = value.trim()
-  const padding = '='.repeat((4 - (normalized.length % 4)) % 4)
-  const base64 = (normalized + padding)
-    .replace(/-/g, '+')
-    .replace(/_/g, '/')
+export function urlBase64ToUint8Array(base64String: string): ArrayBuffer {
+  const padding = "=".repeat((4 - (base64String.length % 4)) % 4)
 
-  const raw = atob(base64)
-  const output = new Uint8Array(raw.length)
+  const base64 = (base64String + padding)
+    .replace(/-/g, "+")
+    .replace(/_/g, "/")
 
-  for (let index = 0; index < raw.length; index += 1) {
-    output[index] = raw.charCodeAt(index)
+  const rawData = atob(base64String ? base64 : "")
+  const buffer = new ArrayBuffer(rawData.length)
+  const outputArray = new Uint8Array(buffer)
+
+  for (let i = 0; i < rawData.length; i++) {
+    outputArray[i] = rawData.charCodeAt(i)
   }
 
-  return output
+  return buffer
 }
 
 export function isWebPushSupported(): boolean {
