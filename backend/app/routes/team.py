@@ -273,15 +273,16 @@ def add_team_member(
         },
     ).scalar() or 0
 
-    if member_count >= team["member_limit"]:
-        raise HTTPException(
-            status_code=402,
-            detail={
-                "message": "Team member limit reached.",
-                "upgrade_required": True,
-                "limit": team["member_limit"],
-            },
-        )
+    if team["member_limit"] is not None:
+        if member_count >= team["member_limit"]:
+            raise HTTPException(
+                status_code=402,
+                detail={
+                    "message": "Team member limit reached.",
+                    "upgrade_required": True,
+                    "limit": team["member_limit"],
+                },
+            )
 
     # If the invited email already belongs to a profile,
     # use its user ID immediately.

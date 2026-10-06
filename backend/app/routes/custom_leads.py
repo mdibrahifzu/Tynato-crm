@@ -1,13 +1,22 @@
 import io
+
 from typing import Dict, List, Optional
+from uuid import UUID
 
 import pandas as pd
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    HTTPException,
+    UploadFile,
+)
+
 from sqlalchemy import text
 from sqlalchemy.orm import Session
+
 from pydantic import BaseModel, Field
-from uuid import UUID
 
 from app.dependencies import (
     get_current_team,
@@ -17,8 +26,6 @@ from app.dependencies import (
 )
 
 router = APIRouter()
-
-
 # ============================================================
 # CONFIGURATION
 # ============================================================
@@ -264,6 +271,73 @@ def _prepare_rows(
     return rows
 
 
+
+# ============================================================
+# SHARED LEAD CREATION
+# ============================================================
+
+def create_custom_lead_record(
+    db: Session,
+    *,
+    team_id,
+    owner_id,
+    ad_name: Optional[str] = None,
+    form_name: Optional[str] = None,
+    full_name: Optional[str] = None,
+    phone_number: Optional[str] = None,
+    email: Optional[str] = None,
+    project_location: Optional[str] = None,
+    created_time=None,
+):
+    row = db.execute(
+        text(
+            """
+            INSERT INTO public.custom_leads (
+                ad_name,
+                form_name,
+                full_name,
+                phone_number,
+                email,
+                project_location,
+                created_time,
+                status,
+                owner_id,
+                team_id
+            )
+            VALUES (
+                :ad_name,
+                :form_name,
+                :full_name,
+                :phone_number,
+                :email,
+                :project_location,
+                :created_time,
+                'new',
+                :owner_id,
+                :team_id
+            )
+            RETURNING id, owner_id, team_id
+            """
+        ),
+        {
+            "ad_name": ad_name,
+            "form_name": form_name,
+            "full_name": full_name,
+            "phone_number": phone_number,
+            "email": email,
+            "project_location": project_location,
+            "created_time": created_time,
+            "owner_id": owner_id,
+            "team_id": team_id,
+        },
+    ).mappings().first()
+
+    if not row:
+        raise RuntimeError("Lead creation failed.")
+
+    return dict(row)
+
+
 # ============================================================
 # PREVIEW
 # ============================================================
@@ -363,66 +437,18 @@ def custom_lead_import(
                 except Exception:
                     created_time = None
 
-            db.execute(
-                text(
-                    """
-                    INSERT INTO custom_leads (
-                        ad_name,
-                        form_name,
-                        full_name,
-                        phone_number,
-                        email,
-                        project_location,
-                        created_time,
-                        status,
-                        owner_id,
-                        team_id
-                    )
-                    VALUES (
-                        :ad_name,
-                        :form_name,
-                        :full_name,
-                        :phone_number,
-                        :email,
-                        :project_location,
-                        :created_time,
-                        'new',
-                        :owner_id,
-                        :team_id
-                    )
-                    """
-                ),
-                {
-                    "ad_name":
-                        row["ad_name"] or None,
-
-                    "form_name":
-                        row["form_name"] or None,
-
-                    "full_name":
-                        row["full_name"] or None,
-
-                    "phone_number":
-                        row["phone_number"] or None,
-
-                    "email":
-                        row["email"] or None,
-
-                    "project_location":
-                        row["project_location?"]
-                        or None,
-
-                    "created_time":
-                        created_time,
-
-                    "owner_id":
-                        current_user["id"],
-
-                    "team_id":
-                        team_id,
-                },
+            create_custom_lead_record(
+                db,
+                team_id=team_id,
+                owner_id=current_user["id"],
+                ad_name=row["ad_name"] or None,
+                form_name=row["form_name"] or None,
+                full_name=row["full_name"] or None,
+                phone_number=row["phone_number"] or None,
+                email=row["email"] or None,
+                project_location=row["project_location?"] or None,
+                created_time=created_time,
             )
-
             saved_count += 1
 
         db.commit()
@@ -634,3 +660,113 @@ def update_custom_lead(
 
     db.commit()
     return dict(updated)
+
+# ============================================================
+# DELETE CUSTOM LEAD
+# ============================================================
+
+# ============================================================
+# DELETE CUSTOM LEAD
+# ============================================================
+
+@router.delete(
+    "/custom-leads/{custom_lead_id}"
+)
+def delete_custom_lead(
+    custom_lead_id: UUID,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+    team=Depends(get_current_team),
+    pending_membership=Depends(
+        get_pending_team_membership
+    ),
+):
+    _check_custom_lead_access(
+        current_user,
+        team,
+        pending_membership,
+    )
+
+    is_admin = (
+        str(current_user.get("role", "")).lower()
+        == "admin"
+        and current_user.get("is_active", True)
+    )
+
+    team_id = (
+        team["team_id"]
+        if team
+        else None
+    )
+
+    owner_id = current_user["id"]
+
+    result = db.execute(
+        text("""
+            DELETE FROM public.custom_leads
+            WHERE id = :custom_lead_id
+              AND (
+                    :is_admin = TRUE
+
+                    OR owner_id = :owner_id
+
+                    OR (
+                        :team_id IS NOT NULL
+                        AND team_id = :team_id
+                    )
+              )
+            RETURNING
+                id,
+                full_name,
+                phone_number,
+                email,
+                owner_id,
+                team_id
+        """),
+        {
+            "custom_lead_id": custom_lead_id,
+            "is_admin": is_admin,
+            "owner_id": owner_id,
+            "team_id": team_id,
+        },
+    )
+
+    deleted = result.mappings().first()
+
+    if not deleted:
+        # Distinguish "does not exist" from "not accessible".
+        existing = db.execute(
+            text("""
+                SELECT
+                    id,
+                    owner_id,
+                    team_id
+                FROM public.custom_leads
+                WHERE id = :custom_lead_id
+                LIMIT 1
+            """),
+            {
+                "custom_lead_id": custom_lead_id,
+            },
+        ).mappings().first()
+
+        db.rollback()
+
+        if not existing:
+            raise HTTPException(
+                status_code=404,
+                detail="Custom lead does not exist.",
+            )
+
+        raise HTTPException(
+            status_code=403,
+            detail="You do not have permission to delete this custom lead.",
+        )
+
+    db.commit()
+
+    return {
+        "success": True,
+        "message": "Custom lead deleted successfully.",
+        "deleted_lead": dict(deleted),
+    }

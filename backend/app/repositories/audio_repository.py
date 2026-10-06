@@ -30,34 +30,48 @@ class AudioRepository:
         ).scalar()
         return int(value or 0)
 
-    def create(self, db, *, owner_id, team_id, original_filename, storage_path, mime_type, file_size):
+    def create(
+    self,
+    db,
+    *,
+    owner_id,
+    team_id,
+    custom_lead_id,
+    original_filename,
+    storage_path,
+    mime_type,
+    file_size,
+):
         result = db.execute(
             text("""
                 INSERT INTO public.audio_files (
-                    owner_id,
-                    team_id,
-                    original_filename,
-                    storage_path,
-                    mime_type,
-                    file_size,
-                    status,
-                    processing_attempts
-                )
+    owner_id,
+    team_id,
+    custom_lead_id,
+    original_filename,
+    storage_path,
+    mime_type,
+    file_size,
+    status,
+    processing_attempts
+)
                 VALUES (
-                    :owner_id,
-                    :team_id,
-                    :original_filename,
-                    :storage_path,
-                    :mime_type,
-                    :file_size,
-                    'uploaded',
-                    0
-                )
+    :owner_id,
+    :team_id,
+    :custom_lead_id,
+    :original_filename,
+    :storage_path,
+    :mime_type,
+    :file_size,
+    'uploaded',
+    0
+)
                 RETURNING *
             """),
             {
                 "owner_id": owner_id,
                 "team_id": team_id,
+                "custom_lead_id": custom_lead_id,
                 "original_filename": original_filename,
                 "storage_path": storage_path,
                 "mime_type": mime_type,
@@ -84,8 +98,8 @@ class AudioRepository:
                         af.owner_id = :owner_id
                         OR :is_admin = TRUE
                         OR (
-                            :team_id IS NOT NULL
-                            AND af.team_id = :team_id
+                            CAST(:team_id AS UUID) IS NOT NULL
+                            AND af.team_id = CAST(:team_id AS UUID)
                         )
                   )
                 LIMIT 1
@@ -99,41 +113,68 @@ class AudioRepository:
         ).mappings().first()
         return result
 
-    def list_for_user(self, db, current_user, team, limit: int = 20, offset: int = 0):
+    def list_for_user(
+    self,
+    db,
+    current_user,
+    team,
+    limit: int = 20,
+    offset: int = 0,
+    custom_lead_id=None,
+):
         result = db.execute(
-            text("""
-                SELECT
-                    af.id,
-                    af.owner_id,
-                    af.team_id,
-                    af.original_filename,
-                    af.mime_type,
-                    af.file_size,
-                    af.status,
-                    af.processing_attempts,
-                    af.error_message,
-                    af.created_at,
-                    af.updated_at
-                FROM public.audio_files af
-                WHERE (
-                    af.owner_id = :owner_id
-                    OR :is_admin = TRUE
-                    OR (
-                        :team_id IS NOT NULL
-                        AND af.team_id = :team_id
-                    )
-                )
-                ORDER BY af.created_at DESC
-                LIMIT :limit OFFSET :offset
-            """),
-            {
-                "owner_id": current_user["id"],
-                "is_admin": current_user["role"] == "admin" and current_user["is_active"],
-                "team_id": team["team_id"] if team else None,
-                "limit": limit,
-                "offset": offset,
-            },
+    text("""
+        SELECT
+            af.id,
+            af.owner_id,
+            af.team_id,
+            af.custom_lead_id,
+            af.original_filename,
+            af.mime_type,
+            af.file_size,
+            af.status,
+            af.processing_attempts,
+            af.error_message,
+            af.created_at,
+            af.updated_at,
+
+            cl.full_name AS lead_name,
+            cl.phone_number AS lead_phone,
+            cl.email AS lead_email
+
+        FROM public.audio_files af
+
+        LEFT JOIN public.custom_leads cl
+            ON cl.id = af.custom_lead_id
+
+        WHERE (
+            af.owner_id = :owner_id
+            OR :is_admin = TRUE
+            OR (
+                CAST(:team_id AS UUID) IS NOT NULL
+                AND af.team_id = CAST(:team_id AS UUID)
+            )
         )
+        AND (
+            CAST(:custom_lead_id AS UUID) IS NULL
+            OR af.custom_lead_id = CAST(:custom_lead_id AS UUID)
+        )
+
+        ORDER BY af.created_at DESC
+        LIMIT :limit OFFSET :offset
+    """),
+    {
+        "owner_id": current_user["id"],
+        "is_admin": (
+            current_user["role"] == "admin"
+            and current_user["is_active"]
+        ),
+        "custom_lead_id": custom_lead_id,
+        "team_id": team["team_id"] if team else None,
+        "limit": limit,
+        "offset": offset,
+    },
+)
         return result.mappings().all()
 
     def get_internal(self, db, audio_id):
@@ -142,6 +183,27 @@ class AudioRepository:
             {"audio_id": audio_id},
         ).mappings().first()
 
+    def get_for_evaluation(self, db, audio_id):
+        """
+        Internal lookup for the background evaluation job.
+        No ownership filter — ownership was already checked
+        when /evaluate was triggered.
+        """
+        result = db.execute(
+            text("""
+                SELECT
+                    af.id,
+                    af.status,
+                    s.transcript
+                FROM public.audio_files af
+                LEFT JOIN public.audio_summaries s ON s.audio_id = af.id
+                WHERE af.id = :audio_id
+                LIMIT 1
+            """),
+            {"audio_id": audio_id},
+        ).mappings().first()
+        return result
+    
     def claim_processing(self, db, audio_id, owner_id, max_concurrent: int) -> bool:
         result = db.execute(
             text("""
@@ -227,29 +289,35 @@ class AudioRepository:
             {"audio_id": audio_id},
         )
 
+
     def get_evaluation(self, db, audio_id):
         result = db.execute(
             text("""
                 SELECT
-                    id,
-                    audio_id,
-                    status,
-                    processing_attempts,
-                    error_message,
-                    client_name,
-                    is_new_conversation,
-                    performance_score,
-                    summary,
-                    model_name,
-                    raw_response,
-                    analysis,
-                    created_at,
-                    updated_at
-                FROM public.audio_evaluations
-                WHERE audio_id = :audio_id
+                    ae.id,
+                    ae.audio_id,
+                    af.custom_lead_id,
+                    ae.status,
+                    ae.processing_attempts,
+                    ae.error_message,
+                    ae.client_name,
+                    ae.is_new_conversation,
+                    ae.performance_score,
+                    ae.summary,
+                    ae.model_name,
+                    ae.raw_response,
+                    ae.analysis,
+                    ae.created_at,
+                    ae.updated_at
+                FROM public.audio_evaluations ae
+                INNER JOIN public.audio_files af
+                    ON af.id = ae.audio_id
+                WHERE ae.audio_id = :audio_id
                 LIMIT 1
             """),
-            {"audio_id": audio_id},
+            {
+                "audio_id": audio_id,
+            },
         ).mappings().first()
 
         return result
@@ -384,27 +452,46 @@ class AudioRepository:
                   AND (
                         owner_id = :owner_id
                         OR :is_admin = TRUE
+                        OR (
+                            CAST(:team_id AS UUID) IS NOT NULL
+                            AND team_id = :team_id
+                        )
                   )
-                RETURNING storage_path
+                RETURNING
+                    id,
+                    storage_path
             """),
             {
                 "audio_id": audio_id,
                 "owner_id": current_user["id"],
-                "is_admin": current_user["role"] == "admin" and current_user["is_active"],
+                "is_admin": (
+                    current_user["role"] == "admin"
+                    and current_user["is_active"]
+                ),
+                "team_id": (
+                    team["team_id"]
+                    if team
+                    else None
+                ),
             },
         ).mappings().first()
+
         return result
+
     def get_evaluation_history(
         self,
         db,
         current_user,
+        team,
         limit: int = 20,
+        custom_lead_id=None,
     ):
         result = db.execute(
             text("""
                 SELECT
                     ae.id,
                     ae.audio_id,
+                    af.custom_lead_id,
                     ae.client_name,
                     ae.performance_score,
                     ae.summary,
@@ -415,13 +502,30 @@ class AudioRepository:
                 FROM public.audio_evaluations ae
                 INNER JOIN public.audio_files af
                     ON af.id = ae.audio_id
-                WHERE af.owner_id = :owner_id
-                  AND ae.status = 'completed'
+                WHERE (
+                    af.owner_id = :owner_id
+                    OR :is_admin = TRUE
+                    OR (
+                        CAST(:team_id AS UUID) IS NOT NULL
+                        AND af.team_id = CAST(:team_id AS UUID)
+                    )
+                )
+                AND ae.status = 'completed'
+                AND (
+                    CAST(:custom_lead_id AS UUID) IS NULL
+                    OR af.custom_lead_id = CAST(:custom_lead_id AS UUID)
+                )
                 ORDER BY ae.created_at ASC
                 LIMIT :limit
             """),
             {
                 "owner_id": current_user["id"],
+                "is_admin": (
+                    current_user["role"] == "admin"
+                    and current_user["is_active"]
+                ),
+                "team_id": team["team_id"] if team else None,
+                "custom_lead_id": custom_lead_id,
                 "limit": limit,
             },
         )

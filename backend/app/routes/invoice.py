@@ -1,7 +1,6 @@
 import os
 from urllib.parse import urlparse
-from uuid import UUID
-
+from uuid import UUID                       
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from fastapi.responses import Response
 from sqlalchemy.exc import IntegrityError

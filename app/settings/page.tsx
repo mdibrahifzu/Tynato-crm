@@ -1,9 +1,11 @@
 'use client'
 
+import Link from 'next/link'
 import Sidebar from '../components/Sidebar'
 import { useEffect, useState } from 'react'
 import { supabase } from '@/app/lib/supabase'
 import { apiFetch } from '@/app/lib/api'
+import WebPushSettings from '@/app/components/WebPushSettings'
 
 type BusinessSettings = {
   id: string | null
@@ -40,6 +42,12 @@ export default function SettingsPage() {
   const [businessError, setBusinessError] = useState('')
   const [businessSuccess, setBusinessSuccess] = useState('')
 
+  const [facebookLinked, setFacebookLinked] = useState(false)
+  const [facebookIdentityCount, setFacebookIdentityCount] = useState(0)
+  const [facebookBusy, setFacebookBusy] = useState(false)
+  const [identityError, setIdentityError] = useState('')
+  const [identitySuccess, setIdentitySuccess] = useState('')
+
   useEffect(() => {
     let mounted = true
 
@@ -59,6 +67,21 @@ export default function SettingsPage() {
         .single()
 
       if (mounted) setFullName(profile?.full_name || '')
+
+      const {
+        data: identityData,
+        error: identityLoadError,
+      } = await supabase.auth.getUserIdentities()
+
+      if (mounted && !identityLoadError) {
+        const identities = identityData?.identities || []
+        const hasFacebook = identities.some(
+          (identity) => identity.provider === 'facebook'
+        )
+
+        setFacebookLinked(hasFacebook)
+        setFacebookIdentityCount(identities.length)
+      }
     }
 
     loadProfile()
@@ -244,6 +267,100 @@ export default function SettingsPage() {
     }
   }
 
+  async function linkFacebook() {
+    if (facebookBusy) return
+
+    setFacebookBusy(true)
+    setIdentityError('')
+    setIdentitySuccess('')
+
+    const { data, error } =
+      await supabase.auth.linkIdentity({
+        provider: 'facebook',
+        options: {
+          redirectTo:
+            `${window.location.origin}/auth/callback?mode=link`,
+        },
+      })
+
+    if (error) {
+      setIdentityError(error.message)
+      setFacebookBusy(false)
+      return
+    }
+
+    if (data?.url) {
+      window.location.assign(data.url)
+      return
+    }
+
+    setFacebookBusy(false)
+  }
+
+  async function unlinkFacebook() {
+    if (facebookBusy) return
+    if (facebookIdentityCount < 2) {
+      setIdentityError(
+        'Facebook cannot be unlinked while it is your only sign-in identity.'
+      )
+      return
+    }
+
+    setFacebookBusy(true)
+    setIdentityError('')
+    setIdentitySuccess('')
+
+    try {
+      const {
+        data: identityData,
+        error: identityLoadError,
+      } = await supabase.auth.getUserIdentities()
+
+      if (identityLoadError) {
+        throw identityLoadError
+      }
+
+      const facebookIdentity =
+        identityData?.identities?.find(
+          (identity) => identity.provider === 'facebook'
+        )
+
+      if (!facebookIdentity) {
+        setFacebookLinked(false)
+        setFacebookIdentityCount(
+          identityData?.identities?.length || 0
+        )
+        return
+      }
+
+      const { error } =
+        await supabase.auth.unlinkIdentity(facebookIdentity)
+
+      if (error) {
+        throw error
+      }
+
+      const remaining =
+        (identityData?.identities || []).filter(
+          (identity) => identity !== facebookIdentity
+        )
+
+      setFacebookLinked(false)
+      setFacebookIdentityCount(remaining.length)
+      setIdentitySuccess(
+        'Facebook was unlinked from this CRM account.'
+      )
+    } catch (error) {
+      setIdentityError(
+        error instanceof Error
+          ? error.message
+          : 'Unable to unlink Facebook.'
+      )
+    } finally {
+      setFacebookBusy(false)
+    }
+  }
+
   const isReadOnlyTeamMember =
     business?.workspace_type === 'team' && !business.can_edit
 
@@ -299,6 +416,50 @@ export default function SettingsPage() {
               Login email changes are handled separately from your invoice business email.
             </p>
           </section>
+
+          <section className="mb-6 rounded-2xl border border-white/[0.08] bg-[var(--bg-card)] p-5 sm:p-6">
+            <div className="mb-5">
+              <p className="text-xs font-medium uppercase tracking-[0.18em] text-blue-400/80">
+                Workspace
+              </p>
+              <h2 className="mt-2 text-xl font-semibold">
+                Integrations
+              </h2>
+              <p className="mt-1 max-w-2xl text-sm leading-6 text-white/45">
+                Connect third-party platforms without leaving the Tynato CRM workspace.
+              </p>
+            </div>
+
+            <Link
+              href="/integrations"
+              className="group flex items-center gap-4 rounded-2xl border border-blue-400/20 bg-blue-500/[0.06] p-5 transition hover:border-blue-400/40 hover:bg-blue-500/[0.09]"
+            >
+              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-blue-500/10 text-xl font-semibold text-blue-300">
+                ↗
+              </div>
+
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <h3 className="text-base font-semibold">
+                    Manage integrations
+                  </h3>
+                  <span className="rounded-full bg-emerald-500/10 px-2.5 py-1 text-[11px] font-semibold text-emerald-300">
+                    Meta Ads available
+                  </span>
+                </div>
+
+                <p className="mt-1 text-sm leading-6 text-white/45">
+                  Open the integrations hub to connect Meta Ads and future marketing platforms.
+                </p>
+              </div>
+
+              <span className="text-xl text-blue-300 transition group-hover:translate-x-0.5">
+                →
+              </span>
+            </Link>
+          </section>
+
+          <WebPushSettings />
 
           <section className="rounded-2xl bg-[var(--bg-card)] p-5 sm:p-6">
             <div className="flex flex-col gap-4 border-b border-white/[0.06] pb-5 sm:flex-row sm:items-start sm:justify-between">
@@ -522,6 +683,74 @@ export default function SettingsPage() {
               </>
             )}
           </section>
+
+      <section className="mt-6 rounded-2xl bg-[var(--bg-card)] p-5 sm:p-6">
+        <div>
+          <p className="text-xs font-medium uppercase tracking-[0.18em] text-blue-400/80">
+            Security
+          </p>
+          <h2 className="mt-2 text-xl font-semibold">Connected identities</h2>
+          <p className="mt-1 max-w-2xl text-sm leading-6 text-white/45">
+            Add Facebook as a sign-in identity for this same Tynato CRM account.
+            This does not grant Meta Ads permissions.
+          </p>
+        </div>
+
+        <div className="mt-5 flex flex-col gap-4 rounded-2xl border border-white/10 bg-black/10 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
+          <div className="flex items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#1877F2] text-base font-bold text-white">
+              f
+            </div>
+
+            <div>
+              <p className="text-sm font-semibold">Facebook</p>
+              <p className="text-xs text-white/40">
+                {facebookLinked
+                  ? 'Linked to this CRM account'
+                  : 'Not linked'}
+              </p>
+            </div>
+          </div>
+
+          {facebookLinked ? (
+            <button
+              type="button"
+              onClick={unlinkFacebook}
+              disabled={facebookBusy || facebookIdentityCount < 2}
+              className="rounded-xl border border-white/10 px-4 py-2.5 text-sm font-semibold transition hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {facebookBusy ? 'Updating…' : 'Unlink Facebook'}
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={linkFacebook}
+              disabled={facebookBusy}
+              className="rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {facebookBusy ? 'Opening Facebook…' : 'Link Facebook'}
+            </button>
+          )}
+        </div>
+
+        {facebookIdentityCount === 1 && facebookLinked && (
+          <p className="mt-3 text-xs leading-5 text-amber-300/70">
+            Facebook cannot be unlinked while it is your only sign-in identity.
+          </p>
+        )}
+
+        {identityError && (
+          <div className="mt-4 rounded-xl border border-rose-400/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
+            {identityError}
+          </div>
+        )}
+
+        {identitySuccess && (
+          <div className="mt-4 rounded-xl border border-emerald-400/20 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200">
+            {identitySuccess}
+          </div>
+        )}
+      </section>
 
           <section className="mt-6 rounded-2xl bg-[var(--bg-card)] p-5 sm:p-6">
             <h2 className="text-lg font-semibold">Appearance</h2>

@@ -31,7 +31,13 @@ def check_upload_limits(db, current_user, is_admin: bool) -> None:
         )
 
 
-def create_upload(db, file: UploadFile, current_user, team):
+def create_upload(
+    db,
+    file: UploadFile,
+    current_user,
+    team,
+    custom_lead_id=None,
+):
     is_admin = current_user["role"] == "admin" and current_user["is_active"]
     check_upload_limits(db, current_user, is_admin)
 
@@ -56,14 +62,15 @@ def create_upload(db, file: UploadFile, current_user, team):
 
     try:
         record = _repo.create(
-            db,
-            owner_id=current_user["id"],
-            team_id=team_id,
-            original_filename=filename,
-            storage_path=storage_path,
-            mime_type=mime_type,
-            file_size=size,
-        )
+    db,
+    owner_id=current_user["id"],
+    team_id=team_id,
+    custom_lead_id=custom_lead_id,
+    original_filename=filename,
+    storage_path=storage_path,
+    mime_type=mime_type,
+    file_size=size,
+)
         db.commit()
         return record
     except Exception:

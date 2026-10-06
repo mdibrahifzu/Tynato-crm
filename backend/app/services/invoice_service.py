@@ -30,7 +30,7 @@ def _build_payload(invoice: InvoiceRequest) -> Dict[str, Any]:
                 "name": item.name,
                 "quantity": float(item.quantity),
                 "unit_cost": float(item.unit_cost),
-            }
+                            }
             for item in invoice.items
         ],
     }

@@ -28,6 +28,16 @@ export interface ModuleRoute {
  */
 export const MODULE_ROUTES: ModuleRoute[] = [
   {
+    moduleKey: 'meta_ads',
+    featureName: 'Meta Ads',
+    matches: (pathname) =>
+      pathname === '/integrations/meta' ||
+      pathname.startsWith('/integrations/meta/') ||
+      pathname === '/meta-ads' ||
+      pathname.startsWith('/meta-ads/'),
+  },
+
+  {
     moduleKey: 'leads',
     featureName: 'Leads',
     matches: (pathname) =>

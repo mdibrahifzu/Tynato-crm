@@ -47,3 +47,5 @@ __pycache__/
 *.pyc
 .vercel
 .env*
+
+backend/.venv/

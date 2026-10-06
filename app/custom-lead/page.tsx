@@ -1,9 +1,13 @@
 'use client'
 
 import Sidebar from '../components/Sidebar'
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useRouter } from 'next/navigation'
 import { apiFetch } from '@/app/lib/api'
+
+/* ==========================================================
+   TYPES & CONSTANTS
+========================================================== */
 
 const SOURCE_COLUMNS = [
   'ad_name',
@@ -15,12 +19,10 @@ const SOURCE_COLUMNS = [
   'created_time',
 ] as const
 
-type SourceColumn =
-  (typeof SOURCE_COLUMNS)[number]
+type SourceColumn = (typeof SOURCE_COLUMNS)[number]
 
 type CustomLead = {
   id: string
-
   ad_name: string | null
   form_name: string | null
   full_name: string | null
@@ -28,61 +30,61 @@ type CustomLead = {
   email: string | null
   project_location: string | null
   created_time: string | null
-
   status: string
   notes: string | null
 }
 
 const STATUS_OPTIONS = [
-  {
-    value: 'new',
-    label: 'New',
-  },
-  {
-    value: 'converted',
-    label: 'Converted',
-  },
-  {
-    value: 'not_interested',
-    label: 'Not Interested',
-  },
-  {
-    value: 'interested',
-    label: 'Interested',
-  },
-  {
-    value: 'follow_up',
-    label: 'Follow-up',
-  },
-  {
-    value: 'junk',
-    label: 'Junk',
-  },
+  { value: 'new', label: 'New' },
+  { value: 'converted', label: 'Converted' },
+  { value: 'not_interested', label: 'Not Interested' },
+  { value: 'interested', label: 'Interested' },
+  { value: 'follow_up', label: 'Follow-up' },
+  { value: 'junk', label: 'Junk' },
 ]
 
-function columnLabel(
-  column: SourceColumn
-) {
-  const labels: Record<
-    SourceColumn,
-    string
-  > = {
+const STATUS_STYLES: Record<string, string> = {
+  new: 'border-slate-500/30 bg-slate-500/15 text-slate-300',
+  interested: 'border-sky-500/30 bg-sky-500/15 text-sky-300',
+  follow_up: 'border-amber-500/30 bg-amber-500/15 text-amber-300',
+  converted: 'border-emerald-500/30 bg-emerald-500/15 text-emerald-300',
+  not_interested: 'border-rose-500/30 bg-rose-500/15 text-rose-300',
+  junk: 'border-zinc-500/30 bg-zinc-500/15 text-zinc-400',
+}
+
+// Shared by header and rows so columns always line up.
+// Actions column is a fixed width (not auto) for that reason.
+const LEAD_GRID =
+  'xl:grid xl:grid-cols-[minmax(0,1.6fr)_minmax(0,1.5fr)_minmax(0,0.9fr)_minmax(0,1fr)_minmax(0,1.6fr)_184px] xl:items-center xl:gap-4'
+
+const LEAD_HEADERS = [
+  'Lead',
+  'Campaign',
+  'Created',
+  'Status',
+  'Notes',
+  'Actions',
+]
+
+/* ==========================================================
+   HELPERS
+========================================================== */
+
+function columnLabel(column: SourceColumn) {
+  const labels: Record<SourceColumn, string> = {
     ad_name: 'Ad Name',
     form_name: 'Form Name',
     full_name: 'Full Name',
     phone_number: 'Phone Number',
     email: 'Email',
-    'project_location?':
-      'Project Location?',
+    'project_location?': 'Project Location?',
     created_time: 'Created Time',
   }
 
   return labels[column]
 }
 
-function displayValue(
-  value: unknown
-) {
+function displayValue(value: unknown) {
   if (
     value === null ||
     value === undefined ||
@@ -94,93 +96,216 @@ function displayValue(
   return String(value)
 }
 
-function formatDate(
-  value: string | null
-) {
-  if (!value) {
-    return 'Nil'
-  }
+function formatDate(value: string | null) {
+  if (!value) return 'Nil'
 
   const date = new Date(value)
 
-  if (Number.isNaN(date.getTime())) {
-    return value
-  }
+  if (Number.isNaN(date.getTime())) return value
 
   return date.toLocaleString()
 }
 
+function cleanPhone(value: string | null) {
+  return value ? value.replace(/^p:/i, '') : null
+}
+
+/* ==========================================================
+   LEAD ROW
+   One component: stacked card on small screens,
+   single grid row from `xl` up. Owns its own edit drafts.
+========================================================== */
+
+function MobileLabel({ children }: { children: ReactNode }) {
+  return (
+    <div
+      className="mb-1 text-[10px] font-semibold uppercase tracking-wide xl:hidden"
+      style={{ color: 'var(--text-muted)' }}
+    >
+      {children}
+    </div>
+  )
+}
+
+function LeadRow({
+  lead,
+  busy,
+  onSave,
+  onDelete,
+  onAudio,
+}: {
+  lead: CustomLead
+  busy: boolean
+  onSave: (lead: CustomLead, status: string, notes: string) => void
+  onDelete: (lead: CustomLead) => void
+  onAudio: (lead: CustomLead) => void
+}) {
+  const [status, setStatus] = useState(lead.status ?? 'new')
+  const [notes, setNotes] = useState(lead.notes ?? '')
+
+  const dirty =
+    status !== (lead.status ?? 'new') ||
+    notes !== (lead.notes ?? '')
+
+  const muted = { color: 'var(--text-muted)' }
+
+  return (
+    <article
+      className={`flex min-w-0 flex-col gap-4 px-4 py-4 transition-colors hover:bg-[var(--accent-soft)] xl:py-3 ${LEAD_GRID}`}
+    >
+      {/* Lead */}
+      <div className="min-w-0">
+        <div className="break-words text-sm font-semibold">
+          {displayValue(lead.full_name)}
+        </div>
+        <div className="break-words text-xs" style={muted}>
+          {displayValue(cleanPhone(lead.phone_number))}
+        </div>
+        {lead.email && (
+          <div className="break-all text-xs" style={muted}>
+            {lead.email}
+          </div>
+        )}
+      </div>
+
+      {/* Campaign */}
+      <div className="min-w-0">
+        <MobileLabel>Campaign</MobileLabel>
+        <div className="break-words text-xs font-medium">
+          {displayValue(lead.ad_name)}
+        </div>
+        <div className="break-words text-xs" style={muted}>
+          {displayValue(lead.form_name)}
+        </div>
+        {lead.project_location && (
+          <div className="break-words text-xs" style={muted}>
+            📍 {lead.project_location}
+          </div>
+        )}
+      </div>
+
+      {/* Created */}
+      <div className="min-w-0">
+        <MobileLabel>Created</MobileLabel>
+        <div className="break-words text-xs">
+          {formatDate(lead.created_time)}
+        </div>
+      </div>
+
+      {/* Status */}
+      <div className="min-w-0">
+        <MobileLabel>Status</MobileLabel>
+        <select
+          value={status}
+          onChange={(e) => setStatus(e.target.value)}
+          aria-label={`Status for ${lead.full_name || 'lead'}`}
+          className={`block w-full min-w-0 rounded-md border px-2 py-1.5 text-xs font-medium ${
+            STATUS_STYLES[status] ?? STATUS_STYLES.new
+          }`}
+        >
+          {STATUS_OPTIONS.map((option) => (
+            <option
+              key={option.value}
+              value={option.value}
+              className="bg-slate-900 text-slate-100"
+            >
+              {option.label}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      {/* Notes */}
+      <div className="min-w-0">
+        <MobileLabel>Notes</MobileLabel>
+        <textarea
+          rows={2}
+          value={notes}
+          onChange={(e) => setNotes(e.target.value)}
+          placeholder="Add notes..."
+          maxLength={5000}
+          aria-label={`Notes for ${lead.full_name || 'lead'}`}
+          className="block w-full min-w-0 resize-none rounded-md border p-2 text-xs"
+          style={{
+            background: 'var(--bg-surface)',
+            color: 'var(--text-primary)',
+            borderColor: 'var(--border-soft)',
+          }}
+        />
+      </div>
+
+      {/* Actions */}
+      <div className="flex min-w-0 items-center gap-1.5">
+        <button
+          type="button"
+          onClick={() => onAudio(lead)}
+          className="inline-flex h-8 flex-1 items-center justify-center whitespace-nowrap rounded-md border border-violet-500/30 bg-violet-500/10 px-2 text-[11px] font-medium text-violet-300 transition hover:bg-violet-500/20 xl:flex-none"
+        >
+          🎙️ Audio
+        </button>
+
+        <button
+          type="button"
+          onClick={() => onSave(lead, status, notes)}
+          disabled={!dirty || busy}
+          className="inline-flex h-8 flex-1 items-center justify-center whitespace-nowrap rounded-md bg-blue-600 px-2.5 text-[11px] font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-40 xl:flex-none"
+        >
+          {busy ? 'Saving…' : 'Update'}
+        </button>
+
+        <button
+          type="button"
+          onClick={() => onDelete(lead)}
+          disabled={busy}
+          className="inline-flex h-8 flex-1 items-center justify-center whitespace-nowrap rounded-md border border-rose-500/30 bg-rose-500/10 px-2 text-[11px] font-medium text-rose-300 transition hover:bg-rose-500/20 disabled:cursor-not-allowed disabled:opacity-40 xl:flex-none"
+        >
+          Delete
+        </button>
+      </div>
+    </article>
+  )
+}
+
+/* ==========================================================
+   PAGE
+========================================================== */
+
 export default function CustomLeadPage() {
   const router = useRouter()
-  const [file, setFile] =
-    useState<File | null>(null)
 
-  const [preview, setPreview] =
-    useState<Record<string, string>[]>(
-      []
-    )
+  const [file, setFile] = useState<File | null>(null)
+  const [preview, setPreview] = useState<Record<string, string>[]>([])
+  const [leads, setLeads] = useState<CustomLead[]>([])
 
-  const [leads, setLeads] =
-    useState<CustomLead[]>([])
+  const [processing, setProcessing] = useState(false)
+  const [importing, setImporting] = useState(false)
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState<string | null>(null)
 
-  const [processing, setProcessing] =
-    useState(false)
+  const [message, setMessage] = useState('')
+  const [processedCount, setProcessedCount] = useState(0)
+  const [skippedCount, setSkippedCount] = useState(0)
 
-  const [importing, setImporting] =
-    useState(false)
+  const [search, setSearch] = useState('')
+  const [statusFilter, setStatusFilter] = useState('all')
 
-  const [loading, setLoading] =
-    useState(true)
-
-  const [saving, setSaving] =
-    useState<string | null>(null)
-
-  const [statusEdits, setStatusEdits] =
-    useState<Record<string, string>>({})
-
-  const [noteEdits, setNoteEdits] =
-    useState<Record<string, string>>({})
-
-  const [message, setMessage] =
-    useState('')
-
-  const [processedCount, setProcessedCount] =
-    useState(0)
-
-  const [skippedCount, setSkippedCount] =
-    useState(0)
+  /* ---------------- data loading ---------------- */
 
   async function loadCustomLeads() {
     try {
       setLoading(true)
 
-      const response =
-        await apiFetch(
-          '/custom-leads'
-        )
-
-      const data =
-        await response.json()
+      const response = await apiFetch('/custom-leads')
+      const data = await response.json()
 
       if (!response.ok) {
-        throw new Error(
-          data?.detail ||
-            'Failed to load custom leads.'
-        )
+        throw new Error(data?.detail || 'Failed to load custom leads.')
       }
 
-      setLeads(
-        Array.isArray(data)
-          ? data
-          : []
-      )
+      setLeads(Array.isArray(data) ? data : [])
     } catch (error: any) {
       console.error(error)
-
-      setMessage(
-        error?.message ||
-          'Failed to load custom leads.'
-      )
+      setMessage(error?.message || 'Failed to load custom leads.')
     } finally {
       setLoading(false)
     }
@@ -190,64 +315,34 @@ export default function CustomLeadPage() {
     loadCustomLeads()
   }, [])
 
-  async function processFile(
-    selectedFile: File
-  ) {
+  /* ---------------- upload / import ---------------- */
+
+  async function processFile(selectedFile: File) {
     try {
       setProcessing(true)
       setMessage('')
 
       const formData = new FormData()
+      formData.append('file', selectedFile)
 
-      formData.append(
-        'file',
-        selectedFile
-      )
+      const response = await apiFetch('/leads/custom/preview', {
+        method: 'POST',
+        body: formData,
+      })
 
-      const response =
-        await apiFetch(
-          '/leads/custom/preview',
-          {
-            method: 'POST',
-            body: formData,
-          }
-        )
-
-      const data =
-        await response.json()
+      const data = await response.json()
 
       if (!response.ok) {
-        throw new Error(
-          data?.detail ||
-            'Could not process file.'
-        )
+        throw new Error(data?.detail || 'Could not process file.')
       }
 
-      setPreview(
-        Array.isArray(data.preview)
-          ? data.preview
-          : []
-      )
-
-      setProcessedCount(
-        data.total_rows || 0
-      )
-
-      setSkippedCount(
-        data.skipped_rows || 0
-      )
-
-      setMessage(
-        'File processed successfully.'
-      )
+      setPreview(Array.isArray(data.preview) ? data.preview : [])
+      setProcessedCount(data.total_rows || 0)
+      setSkippedCount(data.skipped_rows || 0)
+      setMessage('File processed successfully.')
     } catch (error: any) {
       console.error(error)
-
-      setMessage(
-        error?.message ||
-          'File processing failed.'
-      )
-
+      setMessage(error?.message || 'File processing failed.')
       setPreview([])
     } finally {
       setProcessing(false)
@@ -256,10 +351,7 @@ export default function CustomLeadPage() {
 
   async function importLeads() {
     if (!file) {
-      setMessage(
-        'Please select a file first.'
-      )
-
+      setMessage('Please select a file first.')
       return
     }
 
@@ -267,36 +359,21 @@ export default function CustomLeadPage() {
       setImporting(true)
       setMessage('')
 
-      const formData =
-        new FormData()
+      const formData = new FormData()
+      formData.append('file', file)
 
-      formData.append(
-        'file',
-        file
-      )
+      const response = await apiFetch('/leads/custom/import', {
+        method: 'POST',
+        body: formData,
+      })
 
-      const response =
-        await apiFetch(
-          '/leads/custom/import',
-          {
-            method: 'POST',
-            body: formData,
-          }
-        )
-
-      const data =
-        await response.json()
+      const data = await response.json()
 
       if (!response.ok) {
-        throw new Error(
-          data?.detail ||
-            'Import failed.'
-        )
+        throw new Error(data?.detail || 'Import failed.')
       }
 
-      setMessage(
-        `Import completed: ${data.saved_leads} leads added.`
-      )
+      setMessage(`Import completed: ${data.saved_leads} leads added.`)
 
       setFile(null)
       setPreview([])
@@ -306,698 +383,443 @@ export default function CustomLeadPage() {
       await loadCustomLeads()
     } catch (error: any) {
       console.error(error)
-
-      setMessage(
-        error?.message ||
-          'Import failed.'
-      )
+      setMessage(error?.message || 'Import failed.')
     } finally {
       setImporting(false)
     }
   }
 
+  /* ---------------- update / delete ---------------- */
+
   async function updateCustomLead(
-    lead: CustomLead
+    lead: CustomLead,
+    status: string,
+    notes: string
   ) {
     try {
       setSaving(lead.id)
+      setMessage('')
 
-      const status =
-        statusEdits[lead.id] ??
-        lead.status
+      const response = await apiFetch(`/custom-leads/${lead.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status, notes }),
+      })
 
-      const notes =
-        noteEdits[lead.id] ??
-        lead.notes ??
-        ''
-
-      const response =
-        await apiFetch(
-          `/custom-leads/${lead.id}`,
-          {
-            method: 'PATCH',
-            headers: {
-              'Content-Type':
-                'application/json',
-            },
-            body: JSON.stringify({
-              status,
-              notes,
-            }),
-          }
-        )
-
-      const data =
-        await response.json()
+      const data = await response.json()
 
       if (!response.ok) {
-        throw new Error(
-          data?.detail ||
-            'Failed to update custom lead.'
-        )
+        throw new Error(data?.detail || 'Failed to update custom lead.')
       }
 
-      setLeads(
-        (previous) =>
-          previous.map(
-            (item) =>
-              item.id === lead.id
-                ? data
-                : item
-          )
+      setLeads((previous) =>
+        previous.map((item) => (item.id === lead.id ? data : item))
       )
 
-      setStatusEdits(
-        (previous) => {
-          const next = {
-            ...previous,
-          }
-
-          delete next[lead.id]
-
-          return next
-        }
-      )
-
-      setNoteEdits(
-        (previous) => {
-          const next = {
-            ...previous,
-          }
-
-          delete next[lead.id]
-
-          return next
-        }
-      )
-
-      setMessage(
-        'Custom lead updated successfully.'
-      )
+      setMessage('Custom lead updated successfully.')
     } catch (error: any) {
       console.error(error)
-
-      setMessage(
-        error?.message ||
-          'Update failed.'
-      )
+      setMessage(error?.message || 'Update failed.')
     } finally {
       setSaving(null)
     }
   }
-  async function deleteCustomLead(
-  lead: CustomLead
-) {
-  const leadName =
-    lead.full_name ||
-    lead.phone_number ||
-    lead.email ||
-    'this lead'
 
-  const confirmed = window.confirm(
-    `Delete ${leadName}?\n\n` +
-      `This will remove the lead from Custom Leads. ` +
-      `Existing audio recordings and evaluations will be preserved.`
-  )
+  async function deleteCustomLead(lead: CustomLead) {
+    const leadName =
+      lead.full_name || lead.phone_number || lead.email || 'this lead'
 
-  if (!confirmed) {
-    return
-  }
-
-  try {
-    setSaving(lead.id)
-    setMessage('')
-
-    const response = await apiFetch(
-      `/custom-leads/${lead.id}`,
-      {
-        method: 'DELETE',
-      }
+    const confirmed = window.confirm(
+      `Delete ${leadName}?\n\n` +
+        `This will remove the lead from Custom Leads. ` +
+        `Existing audio recordings and evaluations will be preserved.`
     )
 
-    const data = await response
-      .json()
-      .catch(() => null)
+    if (!confirmed) return
 
-    if (!response.ok) {
-      throw new Error(
-        data?.detail ||
-          'Failed to delete custom lead.'
+    try {
+      setSaving(lead.id)
+      setMessage('')
+
+      const response = await apiFetch(`/custom-leads/${lead.id}`, {
+        method: 'DELETE',
+      })
+
+      const data = await response.json().catch(() => null)
+
+      if (!response.ok) {
+        throw new Error(data?.detail || 'Failed to delete custom lead.')
+      }
+
+      setLeads((previous) =>
+        previous.filter((item) => item.id !== lead.id)
       )
+
+      setMessage('Custom lead deleted successfully.')
+    } catch (error: any) {
+      console.error(error)
+      setMessage(error?.message || 'Delete failed.')
+    } finally {
+      setSaving(null)
+    }
+  }
+
+  /* ---------------- derived data ---------------- */
+
+  const statusCounts = useMemo(() => {
+    const counts: Record<string, number> = {}
+
+    for (const lead of leads) {
+      counts[lead.status] = (counts[lead.status] || 0) + 1
     }
 
-    setLeads((previous) =>
-      previous.filter(
-        (item) => item.id !== lead.id
-      )
-    )
+    return counts
+  }, [leads])
 
-    setMessage(
-      'Custom lead deleted successfully.'
-    )
-  } catch (error: any) {
-    console.error(error)
+  const filteredLeads = useMemo(() => {
+    const query = search.trim().toLowerCase()
 
-    setMessage(
-      error?.message ||
-        'Delete failed.'
-    )
-  } finally {
-    setSaving(null)
+    return leads.filter((lead) => {
+      if (statusFilter !== 'all' && lead.status !== statusFilter) {
+        return false
+      }
+
+      if (!query) return true
+
+      return [
+        lead.full_name,
+        lead.phone_number,
+        lead.email,
+        lead.ad_name,
+        lead.form_name,
+        lead.project_location,
+      ].some((value) => value?.toLowerCase().includes(query))
+    })
+  }, [leads, search, statusFilter])
+
+  /* ---------------- render ---------------- */
+
+  const card = {
+    background: 'var(--bg-card)',
+    border: '1px solid var(--border-soft)',
   }
-}
 
   return (
-    <div className="flex min-h-screen">
+        <div className="flex h-screen w-full min-w-0 overflow-hidden">
       <Sidebar />
 
-      <main className="flex-1 p-10">
-
-        <div className="mb-8">
-          <h1 className="text-4xl font-bold">
-            Custom Leads
-          </h1>
+            <main className="min-w-0 flex-1 overflow-y-auto overflow-x-hidden p-4 sm:p-6 lg:p-8">
+        {/* ==================================================
+            PAGE HEADER
+        ================================================== */}
+        <div className="mb-6 min-w-0">
+          <h1 className="text-3xl font-bold sm:text-4xl">Custom Leads</h1>
 
           <p
-            className="mt-2"
-            style={{
-              color: 'var(--text-muted)',
-            }}
+            className="mt-1 break-words text-sm sm:text-base"
+            style={{ color: 'var(--text-muted)' }}
           >
             Upload and manage custom lead data.
           </p>
         </div>
 
-        {/* ================= UPLOAD ================= */}
+        {/* ==================================================
+            UPLOAD
+        ================================================== */}
+        <div className="mb-6 min-w-0 rounded-xl p-4 sm:p-5" style={card}>
+          <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="min-w-0">
+              <h2 className="text-lg font-bold sm:text-xl">
+                Upload Lead File
+              </h2>
 
-        <div
-          className="rounded-xl p-6 mb-8"
-          style={{
-            background:
-              'var(--bg-card)',
-            border:
-              '1px solid rgba(255,255,255,0.08)',
-          }}
-        >
-          <h2 className="text-xl font-bold mb-4">
-            Upload Lead File
-          </h2>
+              <p
+                className="mt-1 text-xs sm:text-sm"
+                style={{ color: 'var(--text-muted)' }}
+              >
+                CSV, XLS, or XLSX
+              </p>
+            </div>
 
-          <input
-            id="custom-lead-file"
-            type="file"
-            accept=".csv,.xlsx,.xls"
-            className="hidden"
-            onChange={(event) => {
-              const selected =
-                event.target.files?.[0] ||
-                null
+            <div className="min-w-0">
+              <input
+                id="custom-lead-file"
+                type="file"
+                accept=".csv,.xlsx,.xls"
+                className="hidden"
+                onChange={(event) => {
+                  const selected = event.target.files?.[0] || null
 
-              setFile(selected)
-              setPreview([])
-              setMessage('')
+                  setFile(selected)
+                  setPreview([])
+                  setMessage('')
 
-              if (selected) {
-                processFile(selected)
-              }
-            }}
-          />
+                  if (selected) processFile(selected)
+                }}
+              />
 
-          <label
-            htmlFor="custom-lead-file"
-            className="
-              inline-flex
-              px-5
-              py-3
-              rounded-lg
-              bg-blue-600
-              hover:bg-blue-700
-              text-white
-              font-medium
-              cursor-pointer
-            "
-          >
-            Choose Lead File
-          </label>
+              <label
+                htmlFor="custom-lead-file"
+                className="inline-flex w-full cursor-pointer items-center justify-center rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-blue-700 sm:w-auto"
+              >
+                Choose Lead File
+              </label>
+            </div>
+          </div>
 
           {processing && (
-            <span className="ml-4 text-sm text-blue-400">
+            <div
+              className="mt-3 break-words text-xs sm:text-sm"
+              style={{ color: '#60a5fa' }}
+            >
               Processing file...
-            </span>
+            </div>
           )}
 
           {file && !processing && (
-            <div className="mt-4 text-sm text-gray-300">
-              {file.name}
+            <div
+              className="mt-3 break-words text-xs sm:text-sm"
+              style={{ color: 'var(--text-muted)' }}
+            >
+              Selected: {file.name}
             </div>
           )}
 
           {message && (
-            <div className="mt-4 text-sm">
+            <div className="mt-3 break-words text-xs sm:text-sm">
               {message}
             </div>
           )}
         </div>
 
-        {/* ================= PREVIEW ================= */}
-
+        {/* ==================================================
+            PREVIEW
+        ================================================== */}
         {preview.length > 0 && (
           <>
-            <div className="grid grid-cols-3 gap-4 mb-6">
-
-              <div
-                className="rounded-xl p-5"
-                style={{
-                  background:
-                    'var(--bg-card)',
-                }}
-              >
-                <div className="text-sm text-gray-400">
-                  Processed
+            <div className="mb-5 grid grid-cols-3 gap-3">
+              {[
+                ['Processed', processedCount],
+                ['Skipped', skippedCount],
+                ['Preview', preview.length],
+              ].map(([label, value]) => (
+                <div
+                  key={label}
+                  className="min-w-0 rounded-xl p-3 sm:p-4"
+                  style={card}
+                >
+                  <div
+                    className="text-[11px] uppercase tracking-wide"
+                    style={{ color: 'var(--text-muted)' }}
+                  >
+                    {label}
+                  </div>
+                  <div className="mt-1 text-xl font-bold sm:text-2xl">
+                    {value}
+                  </div>
                 </div>
-
-                <div className="text-2xl font-bold mt-1">
-                  {processedCount}
-                </div>
-              </div>
-
-              <div
-                className="rounded-xl p-5"
-                style={{
-                  background:
-                    'var(--bg-card)',
-                }}
-              >
-                <div className="text-sm text-gray-400">
-                  Skipped
-                </div>
-
-                <div className="text-2xl font-bold mt-1">
-                  {skippedCount}
-                </div>
-              </div>
-
-              <div
-                className="rounded-xl p-5"
-                style={{
-                  background:
-                    'var(--bg-card)',
-                }}
-              >
-                <div className="text-sm text-gray-400">
-                  Preview
-                </div>
-
-                <div className="text-2xl font-bold mt-1">
-                  {preview.length}
-                </div>
-              </div>
-
+              ))}
             </div>
 
+            {/* Preview table on wide desktop */}
             <div
-              className="overflow-hidden rounded-xl mb-8"
-              style={{
-                background:
-                  'var(--bg-card)',
-              }}
+              className="mb-6 hidden overflow-hidden rounded-xl 2xl:block"
+              style={card}
             >
-              <div className="overflow-x-auto">
-                <table className="w-full min-w-[1100px]">
+              <table className="w-full table-fixed border-collapse">
+                <colgroup>
+                  <col className="w-[14%]" />
+                  <col className="w-[14%]" />
+                  <col className="w-[14%]" />
+                  <col className="w-[14%]" />
+                  <col className="w-[13%]" />
+                  <col className="w-[12%]" />
+                  <col className="w-[19%]" />
+                </colgroup>
 
-                  <thead>
-                    <tr
-                      style={{
-                        background:
-                          'var(--bg-surface)',
-                      }}
-                    >
-                      {SOURCE_COLUMNS.map(
-                        (column) => (
-                          <th
-                            key={column}
-                            className="p-4 text-left whitespace-nowrap"
-                          >
-                            {columnLabel(
-                              column
-                            )}
-                          </th>
-                        )
-                      )}
-                    </tr>
-                  </thead>
+                <thead>
+                  <tr style={{ background: 'var(--bg-surface)' }}>
+                    {SOURCE_COLUMNS.map((column) => (
+                      <th
+                        key={column}
+                        className="border-b border-white/5 px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-wide"
+                        style={{ color: 'var(--text-muted)' }}
+                      >
+                        {columnLabel(column)}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
 
-                  <tbody>
-                    {preview.map(
-                      (row, index) => (
-                        <tr
-                          key={index}
-                          className="border-t border-white/5"
+                <tbody>
+                  {preview.map((row, index) => (
+                    <tr key={index} className="border-t border-white/5">
+                      {SOURCE_COLUMNS.map((column) => (
+                        <td
+                          key={column}
+                          className="min-w-0 px-3 py-2.5 align-middle text-xs"
                         >
-                          {SOURCE_COLUMNS.map(
-                            (column) => (
-                              <td
-                                key={column}
-                                className="p-4 whitespace-nowrap"
-                              >
-                                {displayValue(
-                                  row[column]
-                                )}
-                              </td>
-                            )
-                          )}
-                        </tr>
-                      )
-                    )}
-                  </tbody>
-
-                </table>
-              </div>
+                          <div className="break-words">
+                            {displayValue(row[column])}
+                          </div>
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
 
-            <div className="flex justify-end mb-12">
+            {/* Preview cards on smaller widths */}
+            <div className="mb-6 grid min-w-0 gap-3 2xl:hidden">
+              {preview.map((row, index) => (
+                <article
+                  key={index}
+                  className="min-w-0 rounded-xl p-4"
+                  style={card}
+                >
+                  <div className="mb-3 text-sm font-semibold">
+                    Preview #{index + 1}
+                  </div>
+
+                  <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2">
+                    {SOURCE_COLUMNS.map((column) => (
+                      <div key={column} className="min-w-0">
+                        <div
+                          className="text-[11px] font-semibold uppercase tracking-wide"
+                          style={{ color: 'var(--text-muted)' }}
+                        >
+                          {columnLabel(column)}
+                        </div>
+                        <div className="mt-1 break-words text-sm">
+                          {displayValue(row[column])}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </article>
+              ))}
+            </div>
+
+            <div className="mb-8 flex justify-end">
               <button
-                disabled={
-                  importing ||
-                  processing ||
-                  !file
-                }
+                disabled={importing || processing || !file}
                 onClick={importLeads}
-                className="
-                  bg-green-600
-                  hover:bg-green-700
-                  disabled:opacity-50
-                  text-white
-                  px-6
-                  py-3
-                  rounded-lg
-                  font-medium
-                "
+                className="w-full rounded-lg bg-green-600 px-5 py-2.5 text-sm font-medium text-white transition hover:bg-green-700 disabled:opacity-50 sm:w-auto"
               >
-                {importing
-                  ? 'Importing...'
-                  : 'Import Leads'}
+                {importing ? 'Importing...' : 'Import Leads'}
               </button>
             </div>
           </>
         )}
 
-        {/* ================= SAVED LEADS ================= */}
+        {/* ==================================================
+            SAVED LEADS
+        ================================================== */}
+        <section className="min-w-0">
+          <div className="mb-3 flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <h2 className="break-words text-2xl font-bold">
+              Custom Leads{' '}
+              <span
+                className="text-base font-medium"
+                style={{ color: 'var(--text-muted)' }}
+              >
+                ({filteredLeads.length}
+                {filteredLeads.length !== leads.length &&
+                  ` of ${leads.length}`}
+                )
+              </span>
+            </h2>
 
-        <div className="mb-4">
-          <h2 className="text-2xl font-bold">
-            Custom Leads ({leads.length})
-          </h2>
-        </div>
-
-        {loading ? (
-          <div className="text-gray-400">
-            Loading Custom Leads...
+            <input
+              type="search"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search name, phone, email, ad..."
+              className="w-full rounded-lg border px-3 py-2 text-sm sm:w-72"
+              style={{
+                background: 'var(--bg-surface)',
+                color: 'var(--text-primary)',
+                borderColor: 'var(--border-soft)',
+              }}
+            />
           </div>
-        ) : leads.length === 0 ? (
-          <div className="text-gray-400">
-            No Custom Leads found.
-          </div>
-        ) : (
-          <div
-            className="overflow-hidden rounded-xl"
-            style={{
-              background:
-                'var(--bg-card)',
-              border:
-                '1px solid rgba(255,255,255,0.08)',
-            }}
-          >
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[1700px]">
 
-                <thead>
-                  <tr
-                    style={{
-                      background:
-                        'var(--bg-surface)',
-                    }}
+          {/* Status filter chips */}
+          <div className="mb-4 flex flex-wrap gap-2">
+            {[{ value: 'all', label: 'All' }, ...STATUS_OPTIONS].map(
+              (option) => {
+                const active = statusFilter === option.value
+                const count =
+                  option.value === 'all'
+                    ? leads.length
+                    : statusCounts[option.value] || 0
+
+                return (
+                  <button
+                    key={option.value}
+                    type="button"
+                    onClick={() => setStatusFilter(option.value)}
+                    className={`rounded-full border px-3 py-1 text-xs font-medium transition ${
+                      active
+                        ? 'border-blue-500 bg-blue-600 text-white'
+                        : 'border-white/10 hover:bg-white/5'
+                    }`}
                   >
-                    {SOURCE_COLUMNS.map(
-                      (column) => (
-                        <th
-                          key={column}
-                          className="p-4 text-left whitespace-nowrap"
-                        >
-                          {columnLabel(
-                            column
-                          )}
-                        </th>
-                      )
-                    )}
-
-                    <th className="p-4 text-left whitespace-nowrap">
-                      Status
-                    </th>
-
-                    <th className="p-4 text-left whitespace-nowrap">
-                      Update Status
-                    </th>
-
-                    <th className="p-4 text-left whitespace-nowrap">
-                      Notes
-                    </th>
-
-                    <th className="p-4 text-left whitespace-nowrap">
-                      Actions
-                    </th>
-                    
-                  </tr>
-                  
-                </thead>
-
-                <tbody>
-                  {leads.map(
-                    (lead) => {
-                      const currentStatus =
-                        statusEdits[lead.id] ??
-                        lead.status ??
-                        'new'
-
-                      const currentNotes =
-                        noteEdits[lead.id] ??
-                        lead.notes ??
-                        ''
-
-                      return (
-                        <tr
-                          key={lead.id}
-                          className="border-t border-white/5 hover:bg-white/5"
-                        >
-
-                          <td className="p-4 whitespace-nowrap">
-                            {displayValue(
-                              lead.ad_name
-                            )}
-                          </td>
-
-                          <td className="p-4 whitespace-nowrap">
-                            {displayValue(
-                              lead.form_name
-                            )}
-                          </td>
-
-                          <td className="p-4 whitespace-nowrap">
-                            {displayValue(
-                              lead.full_name
-                            )}
-                          </td>
-
-                          <td className="p-4 whitespace-nowrap">
-                            {displayValue(
-                              lead.phone_number
-                            )}
-                          </td>
-
-                          <td className="p-4 whitespace-nowrap">
-                            {displayValue(
-                              lead.email
-                            )}
-                          </td>
-
-                          <td className="p-4 whitespace-nowrap">
-                            {displayValue(
-                              lead.project_location
-                            )}
-                          </td>
-
-                          <td className="p-4 whitespace-nowrap">
-                            {formatDate(
-                              lead.created_time
-                            )}
-                          </td>
-
-                          <td className="p-4 whitespace-nowrap">
-                            <span className="px-3 py-1 rounded-full bg-slate-500/20 text-slate-300">
-                              {
-                                STATUS_OPTIONS.find(
-                                  (option) =>
-                                    option.value ===
-                                    lead.status
-                                )?.label ||
-                                  'New'
-                              }
-                            </span>
-                          </td>
-
-                          <td className="p-4">
-                            <select
-                              value={
-                                currentStatus
-                              }
-                              onChange={(event) =>
-                                setStatusEdits(
-                                  (previous) => ({
-                                    ...previous,
-                                    [lead.id]:
-                                      event.target
-                                        .value,
-                                  })
-                                )
-                              }
-                              className="
-                                border
-                                rounded
-                                px-3
-                                py-2
-                                bg-white
-                                text-black
-                                min-w-[170px]
-                              "
-                            >
-                              {STATUS_OPTIONS.map(
-                                (option) => (
-                                  <option
-                                    key={
-                                      option.value
-                                    }
-                                    value={
-                                      option.value
-                                    }
-                                  >
-                                    {
-                                      option.label
-                                    }
-                                  </option>
-                                )
-                              )}
-                            </select>
-                          </td>
-
-                          <td className="p-4">
-                            <textarea
-                              rows={2}
-                              value={
-                                currentNotes
-                              }
-                              onChange={(event) =>
-                                setNoteEdits(
-                                  (previous) => ({
-                                    ...previous,
-                                    [lead.id]:
-                                      event.target
-                                        .value,
-                                  })
-                                )
-                              }
-                              placeholder="Add notes..."
-                              maxLength={5000}
-                              className="
-                                border
-                                rounded
-                                p-2
-                                min-w-[220px]
-                                bg-white
-                                text-black
-                              "
-                            />
-                          </td>
-
-                          <td className="p-4">
-  <div className="flex flex-wrap items-center gap-2">
-
-  <button
-    type="button"
-    onClick={() =>
-      router.push(
-        `/audio?custom_lead_id=${lead.id}`
-      )
-    }
-    className="
-      rounded-lg
-      border
-      border-violet-500/30
-      bg-violet-500/10
-      px-4
-      py-2
-      text-violet-300
-      hover:bg-violet-500/20
-    "
-  >
-    🎙️ Audio
-  </button>
-
-  <button
-    type="button"
-    onClick={() =>
-      updateCustomLead(lead)
-    }
-    disabled={saving === lead.id}
-    className="
-      rounded-lg
-      bg-blue-600
-      px-4
-      py-2
-      text-white
-      hover:bg-blue-700
-      disabled:opacity-50
-    "
-  >
-    {saving === lead.id
-      ? 'Saving...'
-      : 'Update'}
-  </button>
-
-  <button
-    type="button"
-    onClick={() =>
-      deleteCustomLead(lead)
-    }
-    disabled={saving === lead.id}
-    className="
-      rounded-lg
-      border
-      border-rose-500/30
-      bg-rose-500/10
-      px-4
-      py-2
-      text-rose-300
-      hover:bg-rose-500/20
-      disabled:opacity-50
-    "
-  >
-    Delete
-  </button>
-
-</div>
-</td>
-
-                        </tr>
-                      )
-                    }
-                  )}
-                </tbody>
-
-              </table>
-            </div>
+                    {option.label} · {count}
+                  </button>
+                )
+              }
+            )}
           </div>
-        )}
 
+          {loading ? (
+            <div className="text-sm" style={{ color: 'var(--text-muted)' }}>
+              Loading Custom Leads...
+            </div>
+          ) : leads.length === 0 ? (
+            <div className="text-sm" style={{ color: 'var(--text-muted)' }}>
+              No Custom Leads found.
+            </div>
+          ) : filteredLeads.length === 0 ? (
+            <div className="text-sm" style={{ color: 'var(--text-muted)' }}>
+              No leads match your search or filter.
+            </div>
+          ) : (
+            <div className="min-w-0 overflow-hidden rounded-xl" style={card}>
+              {/* Column header (desktop only) */}
+              <div
+                className={`hidden border-b border-white/5 px-4 py-2 ${LEAD_GRID}`}
+                style={{ background: 'var(--bg-surface)' }}
+              >
+                {LEAD_HEADERS.map((label) => (
+                  <div
+                    key={label}
+                    className="text-[10px] font-semibold uppercase tracking-wide"
+                    style={{ color: 'var(--text-muted)' }}
+                  >
+                    {label}
+                  </div>
+                ))}
+              </div>
+
+              <div className="divide-y divide-white/5">
+                {filteredLeads.map((lead) => (
+                  <LeadRow
+                    key={lead.id}
+                    lead={lead}
+                    busy={saving === lead.id}
+                    onSave={updateCustomLead}
+                    onDelete={deleteCustomLead}
+                    onAudio={(l) =>
+                      router.push(`/audio?custom_lead_id=${l.id}`)
+                    }
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+        </section>
       </main>
     </div>
   )

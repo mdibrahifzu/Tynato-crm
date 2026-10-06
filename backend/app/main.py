@@ -1,6 +1,17 @@
+
+import os
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+# Load backend/.env before any module that reads os.getenv() at import time.
+BASE_DIR = Path(__file__).resolve().parent.parent
+load_dotenv(BASE_DIR / ".env", override=False)
+
 from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
+
 from app.routes.invoice import router as invoice_router
 from app.database import engine
 from app.routes.search import router as search_router
@@ -14,14 +25,21 @@ from app.routes.lead_status import router as lead_status_router
 from app.routes.team import router as team_router
 from app.routes.business_settings import router as business_settings_router
 from app.dependencies import require_admin
+from app.routes.super_admin import router as super_admin_router
 from app.routes.audio import router as audio_router
+from app.routes.modules import router as modules_router
+from app.routes.notifications import router as notifications_router
+from app.routes.super_admin_modules import (
+    router as super_admin_modules_router,
+)
 from app.routes.custom_leads import (
     router as custom_leads_router,
 )
+from app.routes.web_push import router as web_push_router
 
 
 app = FastAPI()
- 
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -33,9 +51,11 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
- 
+
 app.include_router(search_router)
 app.include_router(leads_router)
+app.include_router(modules_router)
+app.include_router(super_admin_modules_router)
 app.include_router(leads_upload_router)
 app.include_router(dashboard_router)
 app.include_router(export_router)
@@ -43,18 +63,38 @@ app.include_router(search_history_router)
 app.include_router(users_router)
 app.include_router(lead_status_router)
 app.include_router(team_router)
+app.include_router(notifications_router)
+app.include_router(super_admin_router)
 app.include_router(audio_router)
 app.include_router(invoice_router)
 app.include_router(business_settings_router)
-app.include_router(
-    custom_leads_router
-)
+app.include_router(custom_leads_router)
+app.include_router(web_push_router)
+
+
 @app.get("/")
 def root():
     return {"message": "Tynato CRM API Running"}
- 
+
+
 @app.get("/db-test")
 def db_test(current_user=Depends(require_admin)):
     with engine.connect() as conn:
         result = conn.execute(text("SELECT NOW()"))
-        return {"status": "connected", "time": str(result.scalar())}
+        return {
+            "status": "connected",
+            "time": str(result.scalar()),
+        }
+
+
+if os.getenv(
+    "META_ENABLED",
+    "false",
+).strip().lower() in {"1", "true", "yes", "on"}:
+    from app.meta.routes import router as meta_router
+    from app.meta.webhooks import (
+        router as meta_webhook_router,
+    )
+
+    app.include_router(meta_router)
+    app.include_router(meta_webhook_router)

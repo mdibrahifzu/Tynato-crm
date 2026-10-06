@@ -10,7 +10,30 @@ from app.services.gemini_service import (
     _is_retryable_error,
 )
 
+import random
 
+def evaluate_transcript_with_backoff(
+    transcript: str,
+    max_cycles: int = 3,
+) -> tuple[AudioEvaluationResult, str]:
+    if not isinstance(transcript, str) or not transcript.strip():
+        raise EmptyTranscriptError("No transcript available to evaluate.")
+
+    client = _get_client()
+    delay = 2.0
+    last_error = None
+
+    for cycle in range(max_cycles):
+        try:
+            return _generate_evaluation(client, transcript)
+        except Exception as exc:
+            last_error = exc
+            if not _is_retryable_error(exc) or cycle == max_cycles - 1:
+                raise
+            time.sleep(delay + random.uniform(0, 0.5))
+            delay *= 2  # 2s -> 4s -> 8s between full cycles
+
+    raise last_error
 GEMINI_RESPONSE_SCHEMA = {
     "type": "object",
     "properties": {
@@ -581,6 +604,31 @@ def _generate_evaluation(
         f"Tried: {', '.join(attempted_models)}. "
         f"Last error: {last_error}"
     )
+
+def evaluate_transcript_with_backoff(
+    transcript: str,
+    max_cycles: int = 3,
+) -> tuple[AudioEvaluationResult, str]:
+    if not isinstance(transcript, str) or not transcript.strip():
+        raise EmptyTranscriptError("No transcript available to evaluate.")
+
+    client = _get_client()
+    delay = 2.0
+    last_error = None
+
+    for cycle in range(max_cycles):
+        try:
+            return _generate_evaluation(client, transcript)
+        except Exception as exc:
+            last_error = exc
+
+            if not _is_retryable_error(exc) or cycle == max_cycles - 1:
+                raise
+
+            time.sleep(delay + random.uniform(0, 0.5))
+            delay *= 2  # 2s -> 4s -> 8s between full model-cycles
+
+    raise last_error
 
 def evaluate_transcript(
     transcript: str,

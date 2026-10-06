@@ -1,6 +1,15 @@
 from uuid import UUID
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Query, UploadFile
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    Query,
+    UploadFile,
+)
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
@@ -9,7 +18,7 @@ from app.repositories.audio_repository import AudioRepository
 from app.services.audio_config import AUDIO_MAX_PROCESSING_ATTEMPTS
 from app.services.audio_evaluator_service import (
     EmptyTranscriptError,
-    evaluate_transcript,
+    evaluate_transcript_with_backoff,
 )
 from app.services.audio_service import create_upload, process_audio
 from app.services.audio_storage import delete_audio
@@ -22,40 +31,158 @@ _repo = AudioRepository()
 def upload_audio_file(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
+    custom_lead_id: UUID | None = Form(None),
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
     team=Depends(get_current_team),
 ):
-    record = create_upload(db, file, current_user, team)
-    background_tasks.add_task(process_audio, record["id"])
+    if custom_lead_id:
+        lead = db.execute(
+            text("""
+                SELECT
+                    id,
+                    owner_id,
+                    team_id,
+                    full_name,
+                    phone_number,
+                    email
+                FROM public.custom_leads
+                WHERE id = :custom_lead_id
+                  AND (
+                        :is_admin = TRUE
+                        OR (
+                            :team_id IS NOT NULL
+                            AND team_id = :team_id
+                        )
+                        OR (
+                            :team_id IS NULL
+                            AND owner_id = :owner_id
+                            AND team_id IS NULL
+                        )
+                  )
+                LIMIT 1
+            """),
+            {
+                "custom_lead_id": custom_lead_id,
+                "owner_id": current_user["id"],
+                "team_id": (
+                    team["team_id"]
+                    if team
+                    else None
+                ),
+                "is_admin": (
+                    current_user["role"] == "admin"
+                    and current_user["is_active"]
+                ),
+            },
+        ).mappings().first()
+
+        if not lead:
+            raise HTTPException(
+                status_code=404,
+                detail="Custom lead not found.",
+            )
+
+    record = create_upload(
+        db,
+        file,
+        current_user,
+        team,
+        custom_lead_id=custom_lead_id,
+    )
+
+    background_tasks.add_task(
+        process_audio,
+        record["id"],
+    )
+
     return {
         "audio_id": record["id"],
+        "custom_lead_id": custom_lead_id,
         "status": record["status"],
-        "message": "Audio uploaded and queued for processing.",
+        "message": (
+            "Audio uploaded and queued "
+            "for processing."
+        ),
     }
+
+
+def run_evaluation_job(audio_id: UUID):
+    from app.database import SessionLocal
+
+    db = SessionLocal()
+    try:
+        record = _repo.get_for_evaluation(db, audio_id)
+        transcript = record["transcript"] if record else None
+
+        evaluation, model_name = evaluate_transcript_with_backoff(transcript)
+
+        _repo.save_evaluation_success(
+            db,
+            audio_id,
+            evaluation,
+            model_name,
+            evaluation.model_dump(mode="json"),
+        )
+        db.commit()
+
+    except EmptyTranscriptError as exc:
+        db.rollback()
+        _repo.save_evaluation_failure(db, audio_id, str(exc), True)
+        db.commit()
+
+    except Exception:
+        db.rollback()
+        latest = _repo.get_evaluation(db, audio_id)
+        attempts = int(latest["processing_attempts"]) if latest else AUDIO_MAX_PROCESSING_ATTEMPTS
+        final = attempts >= AUDIO_MAX_PROCESSING_ATTEMPTS
+        _repo.save_evaluation_failure(
+            db,
+            audio_id,
+            "AI call evaluation failed. Please retry.",
+            final,
+        )
+        db.commit()
+
+    finally:
+        db.close()
 
 
 @router.get("")
 def list_audio(
     limit: int = Query(20, ge=1, le=50),
     offset: int = Query(0, ge=0),
+    custom_lead_id: UUID | None = Query(None),
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
     team=Depends(get_current_team),
 ):
-    return _repo.list_for_user(db, current_user, team, limit, offset)
+    return _repo.list_for_user(
+        db,
+        current_user,
+        team,
+        limit,
+        offset,
+        custom_lead_id,
+    )
+
 
 @router.get("/evaluations/history")
 def get_evaluation_history(
     limit: int = Query(20, ge=1, le=100),
+    custom_lead_id: UUID | None = Query(None),
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
+    team=Depends(get_current_team),
 ):
     return _repo.get_evaluation_history(
         db,
         current_user,
-        limit,
+        team,
+        limit=limit,
+        custom_lead_id=custom_lead_id,
     )
+
 
 @router.get("/{audio_id}")
 def get_audio(
@@ -141,6 +268,7 @@ def retry_audio(
 @router.post("/{audio_id}/evaluate")
 def evaluate_audio_call(
     audio_id: UUID,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
     team=Depends(get_current_team),
@@ -196,83 +324,14 @@ def evaluate_audio_call(
         )
 
     db.commit()
+    background_tasks.add_task(run_evaluation_job, audio_id)
 
-    try:
-        evaluation, model_name = evaluate_transcript(
-            transcript,
-        )
+    return {
+        "audio_id": audio_id,
+        "status": "processing",
+        "message": "AI evaluation started.",
+    }
 
-        result = _repo.save_evaluation_success(
-            db,
-            audio_id,
-            evaluation,
-            model_name,
-            evaluation.model_dump(
-                mode="json",
-            ),
-        )
-
-        if not result:
-            db.rollback()
-            raise HTTPException(
-                status_code=500,
-                detail="Evaluation was generated but could not be saved.",
-            )
-
-        db.commit()
-        return result
-
-    except EmptyTranscriptError as exc:
-        db.rollback()
-
-        _repo.save_evaluation_failure(
-            db,
-            audio_id,
-            str(exc),
-            True,
-        )
-
-        db.commit()
-
-        raise HTTPException(
-            status_code=422,
-            detail=str(exc),
-        )
-
-    except HTTPException:
-        raise
-
-    except Exception:
-        db.rollback()
-
-        latest = _repo.get_evaluation(
-            db,
-            audio_id,
-        )
-
-        attempts = (
-            int(latest["processing_attempts"])
-            if latest
-            else 0
-        )
-
-        final = (
-            attempts >= AUDIO_MAX_PROCESSING_ATTEMPTS
-        )
-
-        _repo.save_evaluation_failure(
-            db,
-            audio_id,
-            "AI call evaluation failed. Please retry.",
-            final,
-        )
-
-        db.commit()
-
-        raise HTTPException(
-            status_code=503,
-            detail="AI call evaluation is temporarily unavailable.",
-        )
 
 @router.get("/{audio_id}/evaluation")
 def get_audio_evaluation(
@@ -305,13 +364,8 @@ def get_audio_evaluation(
             detail="Evaluation not found.",
         )
 
-    if evaluation["status"] != "completed":
-        raise HTTPException(
-            status_code=409,
-            detail="Evaluation is not completed.",
-        )
-
     return evaluation
+
 
 @router.delete("/{audio_id}")
 def delete_audio_file(
@@ -339,9 +393,6 @@ def delete_audio_file(
     try:
         delete_audio(record["storage_path"])
     except Exception:
-        # Database ownership has already been removed. The object remains
-        # inaccessible through the application but should be cleaned by a
-        # production storage reconciliation job.
         pass
 
     return {

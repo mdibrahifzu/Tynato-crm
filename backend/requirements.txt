@@ -11,4 +11,11 @@ passlib[bcrypt]
 pydantic
 alembic
 openpyxl
+httpx>=0.27,<0.28
+cryptography>=41,<44
+psycopg[binary]
+email-validator
+google-genai
+pywebpush>=2.0,<3
+
  
