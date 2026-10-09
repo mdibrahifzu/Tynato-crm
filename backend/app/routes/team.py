@@ -1,3 +1,7 @@
+import logging
+from app.routes.notifications import create_in_app_notification
+
+logger = logging.getLogger(__name__)
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import text
@@ -385,7 +389,25 @@ def add_team_member(
             "member_email": email,
             "member_id": member_id,
         },
-    ).mappings().first()
+        ).mappings().first()
+
+    if member_id:
+        try:
+            with db.begin_nested():
+                create_in_app_notification(
+                    db,
+                    team_id=team["team_id"],
+                    user_id=member_id,
+                    notification_type="TEAM_INVITE",
+                    title="Team invitation",
+                    message=f"{current_user['email']} invited you to join their team.",
+                    entity_type="team",
+                    entity_id=str(team["team_id"]),
+                    metadata={"invitation_id": str(invitation["id"])},
+                    dedupe_key=f"team_invite:{invitation['id']}",
+                )
+        except Exception:
+            logger.exception("Invite notification failed")
 
     db.commit()
 
@@ -393,7 +415,6 @@ def add_team_member(
         "success": True,
         "invitation": invitation,
     }
-
 
 # =========================================================
 # REMOVE MEMBER
@@ -557,7 +578,10 @@ def accept_invitation(
         },
     ).scalar() or 0
 
-    if member_count > invitation["member_limit"]:
+    if (
+        invitation["member_limit"] is not None
+        and member_count > invitation["member_limit"]
+    ):
         raise HTTPException(
             status_code=402,
             detail="The team member limit has been reached.",

@@ -536,3 +536,113 @@ export async function getAuditLogs(
 
   return parseApiResponse<AuditLog[]>(res)
 }
+/* =========================================================
+   SALES CALL SCHEDULING
+   ========================================================= */
+
+export interface SalesCallSlot {
+  start_at: string
+  end_at: string
+  display_time: string
+}
+
+export interface SalesCallAvailability {
+  date: string
+  timezone: string
+  slots: SalesCallSlot[]
+}
+
+export interface SalesCallBooking {
+  id: string
+  start_at: string
+  end_at: string
+  status: 'booked' | 'cancelled' | 'completed'
+  created_at?: string
+}
+
+export interface SalesCallSettings {
+  user_id: string
+  full_name: string | null
+  email: string | null
+  default_slot_duration_minutes: number
+  timezone: string
+}
+
+export interface SalesAvailabilityInterval {
+  id?: string
+  day_of_week: number
+  start_time: string
+  end_time: string
+  slot_duration_minutes: number | null
+  is_active?: boolean
+}
+
+export interface SalesCallInternalBooking extends SalesCallBooking {
+  sales_user_id: string
+  sales_user_name: string | null
+  sales_user_email: string | null
+  customer_team_id: string
+  customer_team_name: string
+  booked_by_user_id: string
+  updated_at?: string
+}
+
+export async function getSalesCallAvailability(
+  date: string,
+): Promise<SalesCallAvailability> {
+  const res = await apiFetch(
+    `/sales-call/availability?date=${encodeURIComponent(date)}`,
+  )
+  return parseApiResponse<SalesCallAvailability>(res)
+}
+
+export async function bookSalesCall(
+  startAt: string,
+): Promise<SalesCallBooking> {
+  const res = await apiFetch('/sales-call/book', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      start_at: startAt,
+    }),
+  })
+  return parseApiResponse<SalesCallBooking>(res)
+}
+
+export async function getMySalesCallBookings(
+  date: string,
+): Promise<{ date: string; bookings: SalesCallBooking[] }> {
+  const res = await apiFetch(
+    `/sales-call/my-bookings?date=${encodeURIComponent(date)}`,
+  )
+  return parseApiResponse<{ date: string; bookings: SalesCallBooking[] }>(res)
+}
+
+export async function isSalesScheduler(): Promise<boolean> {
+  try {
+    const res = await apiFetch('/sales-scheduling/me')
+    return res.ok
+  } catch {
+    return false
+  }
+}
+
+export async function rescheduleSalesCall(
+  bookingId: string,
+  startLocal: string,
+): Promise<SalesCallBooking> {
+  const res = await apiFetch(
+    `/sales-scheduling/bookings/${encodeURIComponent(bookingId)}/reschedule`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ start_local: startLocal }),
+    },
+  )
+
+  return parseApiResponse<SalesCallBooking>(res)
+}

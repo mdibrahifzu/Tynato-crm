@@ -249,11 +249,17 @@ def run_forever():
 
     while True:
         try:
-            process_batch()
-        except Exception:
-            # Keep the worker alive; each individual delivery has
-            # already been isolated by the outbox transaction.
-            pass
+            processed = process_batch()
+            print(
+                f"[Web Push Worker] polling... processed={processed}",
+                flush=True,
+            )
+        except Exception as exc:
+            # Keep the worker alive, but expose the actual failure.
+            print(
+                f"[Web Push Worker] cycle failed: {exc!r}",
+                flush=True,
+            )
 
         time.sleep(poll_seconds)
 

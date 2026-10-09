@@ -93,6 +93,41 @@ def get_current_user(
     return profile
 
 
+def require_sales_scheduler(
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Dedicated internal scheduling permission.
+
+    Access is granted only when the authenticated profile has an
+    active row in the private sales_scheduler_users table. No customer
+    team role (user/admin) is treated as scheduler access.
+    """
+    scheduler = db.execute(
+        text(
+            """
+            SELECT 1
+            FROM public.sales_scheduler_users s
+            INNER JOIN public.profiles p
+                ON p.id = s.user_id
+            WHERE s.user_id = :user_id
+              AND s.is_active = TRUE
+              AND p.is_active = TRUE
+            LIMIT 1
+            """
+        ),
+        {"user_id": current_user["id"]},
+    ).first()
+
+    if not scheduler:
+        raise HTTPException(
+            status_code=403,
+            detail="Sales Scheduler access required.",
+        )
+
+    return current_user
+
+
 def require_super_admin(
     current_user=Depends(get_current_user),
 ):

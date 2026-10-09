@@ -58,6 +58,9 @@ function targetFor(item: NotificationItem) {
     case 'lead':
       return `/leads/${item.entity_id}`
     case 'custom_lead':
+      if (item.type.toUpperCase() === 'LEAD_FOLLOW_UP') {
+        return '/custom-lead'
+      }
       return `/audio?custom_lead_id=${item.entity_id}`
     case 'audio':
     case 'audio_evaluation':

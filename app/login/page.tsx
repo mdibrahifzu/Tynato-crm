@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '../lib/supabase'
-import { superAdminAccessCheck } from '../lib/api'
+import { isSalesScheduler, superAdminAccessCheck } from '../lib/api'
 
 export default function LoginPage() {
   const router = useRouter()
@@ -74,6 +74,17 @@ async function login(e: React.FormEvent<HTMLFormElement>) {
           result.platform_role === 'super_admin'
         ) {
           router.replace('/super-admin')
+          return
+        }
+      } catch {
+        // Normal users continue below.
+      }
+
+      try {
+        const salesScheduler = await isSalesScheduler()
+
+        if (salesScheduler) {
+          router.replace('/sales-scheduling')
           return
         }
       } catch {

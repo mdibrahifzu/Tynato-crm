@@ -4,7 +4,7 @@ import Link from "next/link"
 import { useEffect, useMemo, useState } from "react"
 import Sidebar from "@/app/components/Sidebar"
 import { apiFetch } from "@/app/lib/api"
-
+void apiFetch('/meta/sync-now', { method: 'POST' }).catch(() => {})
 type Connection = {
   id: string
   meta_user_id?: string | null

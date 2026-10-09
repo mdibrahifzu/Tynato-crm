@@ -120,7 +120,7 @@ def subscribe(
         ),
         {
             "user_id": current_user["id"],
-            "team_id": team["team_id"],
+            "team_id": team["team_id"] if team else None,
             "endpoint": endpoint,
             "p256dh": payload.keys.p256dh,
             "auth": payload.keys.auth,
@@ -138,7 +138,6 @@ def unsubscribe(
     payload: PushSubscriptionRequest,
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
-    team=Depends(get_current_team),
 ):
     db.execute(
         text(
@@ -148,18 +147,15 @@ def unsubscribe(
                 updated_at = NOW()
             WHERE endpoint = :endpoint
               AND user_id = :user_id
-              AND team_id = :team_id
             """
         ),
         {
             "endpoint": payload.endpoint.strip(),
             "user_id": current_user["id"],
-            "team_id": team["team_id"],
         },
     )
 
     db.commit()
     return {"success": True}
-
 
 __all__ = ["router"]

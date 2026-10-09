@@ -4,7 +4,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import text
 from sqlalchemy.orm import Session
-
+from fastapi import BackgroundTasks
 from app.dependencies import get_current_user, get_db, require_team
 from app.meta.client import MetaAPIError, MetaClient
 from app.meta.config import META_ENABLED, META_APP_ID, validate_runtime_config
@@ -59,7 +59,22 @@ def oauth_start(
     state = create_oauth_state(db, current_user["id"], team)
     return {"auth_url": build_authorization_url(state)}
 
+@router.post("/sync-now")
+def sync_now(
+    background_tasks: BackgroundTasks,
+    current_user: Dict = Depends(get_current_user),
+    team: Dict = Depends(require_team),
+):
+    try:
+        _require_actor(team, current_user)
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc))
 
+    from app.meta.lead_backfill import sync_team_now
+
+    background_tasks.add_task(sync_team_now, team["team_id"])
+    return {"success": True}
+    
 @router.post("/oauth/complete")
 def oauth_complete(
     payload: OAuthCompleteRequest,
@@ -248,6 +263,137 @@ def list_campaigns(
                 connection_predicate=connection_predicate,
                 account_predicate=account_predicate,
             )
+        ),
+        params,
+    ).mappings().all()
+    return [dict(row) for row in rows]
+
+
+@router.get("/adsets")
+def list_adsets(
+    connection_id: Optional[UUID] = None,
+    ad_account_row_id: Optional[UUID] = None,
+    campaign_id: Optional[str] = None,
+    db: Session = Depends(get_db),
+    team: Dict = Depends(require_team),
+):
+    params: Dict = {"team_id": team["team_id"]}
+    predicates = []
+
+    if connection_id is not None:
+        predicates.append("s.connection_id = :connection_id")
+        params["connection_id"] = connection_id
+    if ad_account_row_id is not None:
+        predicates.append("s.ad_account_row_id = :ad_account_row_id")
+        params["ad_account_row_id"] = ad_account_row_id
+    if campaign_id is not None:
+        predicates.append("s.meta_campaign_id = :campaign_id")
+        params["campaign_id"] = campaign_id
+
+    where_extra = ""
+    if predicates:
+        where_extra = "AND " + " AND ".join(predicates)
+
+    rows = db.execute(
+        text(
+            """
+            SELECT
+                s.id,
+                s.connection_id,
+                s.ad_account_row_id,
+                s.campaign_row_id,
+                aa.name AS ad_account_name,
+                c.name AS campaign_name,
+                s.meta_adset_id,
+                s.meta_campaign_id,
+                s.name,
+                s.status,
+                s.optimization_goal,
+                s.billing_event,
+                s.start_time,
+                s.end_time,
+                s.last_seen_at,
+                s.updated_at
+            FROM public.meta_adsets s
+            INNER JOIN public.meta_ad_accounts aa
+                ON aa.id = s.ad_account_row_id
+               AND aa.team_id = s.team_id
+            LEFT JOIN public.meta_campaigns c
+                ON c.id = s.campaign_row_id
+               AND c.team_id = s.team_id
+            WHERE s.team_id = :team_id
+              {where_extra}
+            ORDER BY s.updated_at DESC, s.name ASC
+            """.format(where_extra=where_extra)
+        ),
+        params,
+    ).mappings().all()
+    return [dict(row) for row in rows]
+
+
+@router.get("/ads")
+def list_ads(
+    connection_id: Optional[UUID] = None,
+    ad_account_row_id: Optional[UUID] = None,
+    adset_id: Optional[str] = None,
+    campaign_id: Optional[str] = None,
+    db: Session = Depends(get_db),
+    team: Dict = Depends(require_team),
+):
+    params: Dict = {"team_id": team["team_id"]}
+    predicates = []
+
+    if connection_id is not None:
+        predicates.append("a.connection_id = :connection_id")
+        params["connection_id"] = connection_id
+    if ad_account_row_id is not None:
+        predicates.append("a.ad_account_row_id = :ad_account_row_id")
+        params["ad_account_row_id"] = ad_account_row_id
+    if adset_id is not None:
+        predicates.append("a.meta_adset_id = :adset_id")
+        params["adset_id"] = adset_id
+    if campaign_id is not None:
+        predicates.append("a.meta_campaign_id = :campaign_id")
+        params["campaign_id"] = campaign_id
+
+    where_extra = ""
+    if predicates:
+        where_extra = "AND " + " AND ".join(predicates)
+
+    rows = db.execute(
+        text(
+            """
+            SELECT
+                a.id,
+                a.connection_id,
+                a.ad_account_row_id,
+                a.adset_row_id,
+                aa.name AS ad_account_name,
+                s.name AS adset_name,
+                c.name AS campaign_name,
+                a.meta_ad_id,
+                a.meta_adset_id,
+                a.meta_campaign_id,
+                a.creative_id,
+                a.name,
+                a.status,
+                a.last_seen_at,
+                a.updated_at
+            FROM public.meta_ads a
+            INNER JOIN public.meta_ad_accounts aa
+                ON aa.id = a.ad_account_row_id
+               AND aa.team_id = a.team_id
+            LEFT JOIN public.meta_adsets s
+                ON s.id = a.adset_row_id
+               AND s.team_id = a.team_id
+            LEFT JOIN public.meta_campaigns c
+                ON c.ad_account_row_id = a.ad_account_row_id
+               AND c.meta_campaign_id = a.meta_campaign_id
+               AND c.team_id = a.team_id
+            WHERE a.team_id = :team_id
+              {where_extra}
+            ORDER BY a.updated_at DESC, a.name ASC
+            """.format(where_extra=where_extra)
         ),
         params,
     ).mappings().all()

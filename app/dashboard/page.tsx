@@ -7,7 +7,7 @@ import { apiFetch } from '@/app/lib/api'
 
 interface DashboardStats {
   total_leads: number
-  searched_leads: number
+  meta_leads: number
   manual_imported_leads: number
 
   new: number
@@ -15,13 +15,12 @@ interface DashboardStats {
   follow_up: number
   converted: number
 
-  recent_searches: string[]
   total_users: number
 }
 
 const emptyStats: DashboardStats = {
   total_leads: 0,
-  searched_leads: 0,
+  meta_leads: 0,
   manual_imported_leads: 0,
 
   new: 0,
@@ -29,13 +28,16 @@ const emptyStats: DashboardStats = {
   follow_up: 0,
   converted: 0,
 
-  recent_searches: [],
   total_users: 0,
 }
 
 function percent(value: number, total: number) {
   if (!total) return 0
-  return Math.min(100, Math.max(0, (value / total) * 100))
+
+  return Math.min(
+    100,
+    Math.max(0, (value / total) * 100)
+  )
 }
 
 function StatCard({
@@ -106,6 +108,7 @@ function FunnelRow({
         <span className="text-slate-400">
           {label}
         </span>
+
         <span className="font-semibold">
           {value}
         </span>
@@ -114,7 +117,9 @@ function FunnelRow({
       <div className="h-2 overflow-hidden rounded-full bg-white/[0.07]">
         <div
           className={`h-full rounded-full ${barClass}`}
-          style={{ width: `${label === 'Total Leads' ? 100 : width}%` }}
+          style={{
+            width: `${label === 'Total Leads' ? 100 : width}%`,
+          }}
         />
       </div>
     </div>
@@ -122,7 +127,9 @@ function FunnelRow({
 }
 
 export default function DashboardPage() {
-  const [stats, setStats] = useState<DashboardStats>(emptyStats)
+  const [stats, setStats] =
+    useState<DashboardStats>(emptyStats)
+
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
@@ -130,16 +137,30 @@ export default function DashboardPage() {
   }, [])
 
   async function checkAuthentication() {
-    const {
-      data: { session },
-    } = await supabase.auth.getSession()
+    try {
+      const {
+        data: { session },
+        error,
+      } = await supabase.auth.getSession()
 
-    if (!session) {
-      window.location.href = '/login'
-      return
+      if (error) {
+        throw error
+      }
+
+      if (!session) {
+        window.location.href = '/login'
+        return
+      }
+
+      await fetchDashboard()
+    } catch (error) {
+      console.error(
+        'Dashboard authentication error:',
+        error
+      )
+
+      setLoading(false)
     }
-
-    fetchDashboard()
   }
 
   async function fetchDashboard() {
@@ -157,20 +178,21 @@ export default function DashboardPage() {
       console.log('Dashboard Data:', data)
 
       setStats({
-  total_leads: data.total_leads || 0,
+        total_leads: Number(data.total_leads ?? 0),
 
-  searched_leads: data.searched_leads || 0,
-  manual_imported_leads:
-    data.manual_imported_leads || 0,
+        meta_leads: Number(data.meta_leads ?? 0),
 
-  new: data.new || 0,
-  interested: data.interested || 0,
-  follow_up: data.follow_up || 0,
-  converted: data.converted || 0,
+        manual_imported_leads: Number(
+          data.manual_imported_leads ?? 0
+        ),
 
-  recent_searches: data.recent_searches || [],
-  total_users: data.total_users || 0,
-})
+        new: Number(data.new ?? 0),
+        interested: Number(data.interested ?? 0),
+        follow_up: Number(data.follow_up ?? 0),
+        converted: Number(data.converted ?? 0),
+
+        total_users: Number(data.total_users ?? 0),
+      })
     } catch (error) {
       console.error('Dashboard Error:', error)
     } finally {
@@ -187,6 +209,7 @@ export default function DashboardPage() {
           <div className="mx-auto max-w-7xl">
             <div className="animate-pulse space-y-5">
               <div className="h-8 w-64 rounded bg-white/[0.06]" />
+
               <div className="h-4 w-96 max-w-full rounded bg-white/[0.04]" />
 
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
@@ -266,120 +289,117 @@ export default function DashboardPage() {
               accent="#a78bfa"
             />
           </section>
-          
 
           {/* Main analytics */}
           <section className="mt-6 grid grid-cols-1 gap-6 xl:grid-cols-[1.35fr_0.9fr]">
             <div className="crm-card p-6">
-  <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-    <div>
-      <h2 className="text-lg font-semibold">
-        Lead Overview
-      </h2>
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <h2 className="text-lg font-semibold">
+                    Lead Overview
+                  </h2>
 
-      <p className="mt-1 text-xs text-slate-500">
-        Lead sources and current pipeline status.
-      </p>
-    </div>
+                  <p className="mt-1 text-xs text-slate-500">
+                    Lead sources and current pipeline status.
+                  </p>
+                </div>
 
-    <span className="rounded-full border border-blue-400/10 bg-blue-400/10 px-3 py-1 text-[11px] font-medium text-blue-300">
-      {stats.total_leads} total
-    </span>
-  </div>
+                <span className="rounded-full border border-blue-400/10 bg-blue-400/10 px-3 py-1 text-[11px] font-medium text-blue-300">
+                  {stats.total_leads} total
+                </span>
+              </div>
 
-  {/* Lead Sources */}
-  <div className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-3">
+              {/* Lead Sources */}
+              <div className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-3">
+                <div className="crm-surface p-4">
+                  <p className="text-[11px] uppercase tracking-wider text-slate-500">
+                    Total Leads
+                  </p>
 
-    <div className="crm-surface p-4">
-      <p className="text-[11px] uppercase tracking-wider text-slate-500">
-        Total Leads
-      </p>
+                  <p className="mt-2 text-3xl font-bold">
+                    {stats.total_leads}
+                  </p>
+                </div>
 
-      <p className="mt-2 text-3xl font-bold">
-        {stats.total_leads}
-      </p>
-    </div>
+                <div className="crm-surface p-4">
+                  <p className="text-[11px] uppercase tracking-wider text-slate-500">
+                    Meta Leads
+                  </p>
 
-    <div className="crm-surface p-4">
-      <p className="text-[11px] uppercase tracking-wider text-slate-500">
-        Searched Leads
-      </p>
+                  <p className="mt-2 text-3xl font-bold">
+                    {stats.meta_leads}
+                  </p>
+                </div>
 
-      <p className="mt-2 text-3xl font-bold">
-        {stats.searched_leads}
-      </p>
-    </div>
+                <div className="crm-surface p-4">
+                  <p className="text-[11px] uppercase tracking-wider text-slate-500">
+                    Manual Imported
+                  </p>
 
-    <div className="crm-surface p-4">
-      <p className="text-[11px] uppercase tracking-wider text-slate-500">
-        Manual Imported
-      </p>
+                  <p className="mt-2 text-3xl font-bold">
+                    {stats.manual_imported_leads}
+                  </p>
+                </div>
+              </div>
 
-      <p className="mt-2 text-3xl font-bold">
-        {stats.manual_imported_leads}
-      </p>
-    </div>
+              {/* Status */}
+              <div className="mt-6">
+                <h3 className="text-sm font-semibold text-slate-300">
+                  Lead Status
+                </h3>
 
-  </div>
+                <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <div className="crm-surface flex items-center justify-between p-4">
+                    <span className="text-sm text-slate-400">
+                      New
+                    </span>
 
-  {/* Status */}
-  <div className="mt-6">
-    <h3 className="text-sm font-semibold text-slate-300">
-      Lead Status
-    </h3>
+                    <span className="text-xl font-bold">
+                      {stats.new}
+                    </span>
+                  </div>
 
-    <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <div className="crm-surface flex items-center justify-between p-4">
+                    <span className="text-sm text-slate-400">
+                      Interested
+                    </span>
 
-      <div className="crm-surface flex items-center justify-between p-4">
-        <span className="text-sm text-slate-400">
-          New
-        </span>
+                    <span className="text-xl font-bold">
+                      {stats.interested}
+                    </span>
+                  </div>
 
-        <span className="text-xl font-bold">
-          {stats.new}
-        </span>
-      </div>
+                  <div className="crm-surface flex items-center justify-between p-4">
+                    <span className="text-sm text-slate-400">
+                      Follow-up
+                    </span>
 
-      <div className="crm-surface flex items-center justify-between p-4">
-        <span className="text-sm text-slate-400">
-          Interested
-        </span>
+                    <span className="text-xl font-bold">
+                      {stats.follow_up}
+                    </span>
+                  </div>
 
-        <span className="text-xl font-bold">
-          {stats.interested}
-        </span>
-      </div>
+                  <div className="crm-surface flex items-center justify-between p-4">
+                    <span className="text-sm text-slate-400">
+                      Converted
+                    </span>
 
-      <div className="crm-surface flex items-center justify-between p-4">
-        <span className="text-sm text-slate-400">
-          Follow-up
-        </span>
+                    <span className="text-xl font-bold">
+                      {stats.converted}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
 
-        <span className="text-xl font-bold">
-          {stats.follow_up}
-        </span>
-      </div>
-
-      <div className="crm-surface flex items-center justify-between p-4">
-        <span className="text-sm text-slate-400">
-          Converted
-        </span>
-
-        <span className="text-xl font-bold">
-          {stats.converted}
-        </span>
-      </div>
-
-    </div>
-  </div>
-</div>
-
+            {/* Quick Metrics */}
             <div className="crm-card p-6">
               <div className="flex items-start justify-between">
                 <div>
                   <h2 className="text-lg font-semibold">
                     Quick Metrics
                   </h2>
+
                   <p className="mt-1 text-xs text-slate-500">
                     Useful context from the existing dashboard API.
                   </p>
@@ -395,6 +415,7 @@ export default function DashboardPage() {
                   <p className="text-[11px] uppercase tracking-wider text-slate-500">
                     Interest rate
                   </p>
+
                   <p className="mt-2 text-2xl font-bold">
                     {Math.round(
                       percent(
@@ -409,6 +430,7 @@ export default function DashboardPage() {
                   <p className="text-[11px] uppercase tracking-wider text-slate-500">
                     Conversion rate
                   </p>
+
                   <p className="mt-2 text-2xl font-bold">
                     {Math.round(
                       percent(
@@ -423,60 +445,12 @@ export default function DashboardPage() {
                   <p className="text-[11px] uppercase tracking-wider text-slate-500">
                     Team users
                   </p>
+
                   <p className="mt-2 text-2xl font-bold">
                     {stats.total_users}
                   </p>
                 </div>
               </div>
-            </div>
-          </section>
-
-          {/* Recent searches */}
-          <section className="crm-card mt-6 p-6">
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-              <div>
-                <h2 className="text-lg font-semibold">
-                  Recent Searches
-                </h2>
-                <p className="mt-1 text-xs text-slate-500">
-                  Latest search activity already returned by the dashboard API.
-                </p>
-              </div>
-
-              <span className="text-xs text-slate-500">
-                {stats.recent_searches.length} recent
-              </span>
-            </div>
-
-            <div className="mt-5">
-              {stats.recent_searches.length > 0 ? (
-                <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
-                  {stats.recent_searches.map((search, index) => (
-                    <div
-                      key={`${search}-${index}`}
-                      className="flex items-center gap-3 rounded-xl border border-white/[0.06] bg-white/[0.025] px-4 py-3 transition hover:bg-white/[0.04]"
-                    >
-                      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-blue-500/10 text-blue-300">
-                        ⌕
-                      </span>
-
-                      <span className="min-w-0 truncate text-sm text-slate-300">
-                        {search}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="rounded-xl border border-dashed border-white/10 px-5 py-10 text-center">
-                  <div className="text-3xl">⌕</div>
-                  <p className="mt-3 font-medium">
-                    No recent searches
-                  </p>
-                  <p className="mt-1 text-sm text-slate-500">
-                    Search activity will appear here when available.
-                  </p>
-                </div>
-              )}
             </div>
           </section>
         </div>

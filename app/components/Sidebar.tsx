@@ -1,5 +1,5 @@
 'use client'
-
+ 
 import Link from 'next/link'
 import {
   usePathname,
@@ -9,11 +9,16 @@ import {
   useEffect,
   useState,
 } from 'react'
-
+ 
 import NotificationBell from './NotificationBell'
+import PushEnable from './PushEnable'
 import { supabase } from '@/app/lib/supabase'
-
-const menus = [
+ 
+const menus: Array<{
+  label: string
+  href: string
+  icon: string
+}> = [
   {
     label: 'Dashboard',
     href: '/dashboard',
@@ -30,11 +35,6 @@ const menus = [
     icon: '＋',
   },
   {
-    label: 'Find Leads',
-    href: '/search',
-    icon: '⌕',
-  },
-  {
     label: 'Upload Audio',
     href: '/audio',
     icon: '◒',
@@ -43,11 +43,6 @@ const menus = [
     label: 'Invoices',
     href: '/invoices',
     icon: '▣',
-  },
-  {
-    label: 'Search History',
-    href: '/search_history',
-    icon: '◷',
   },
   {
     label: 'Users',
@@ -59,54 +54,60 @@ const menus = [
     href: '/integrations',
     icon: '◇',
   },
+  {
+    label: 'Sales Call',
+    href: '/sales-call',
+    icon: '◷',
+  },
 ]
-
+ 
 export default function Sidebar() {
   const pathname = usePathname()
   const router = useRouter()
-
+ 
   const [isAdmin, setIsAdmin] =
     useState(false)
-
+ 
   useEffect(() => {
     async function loadRole() {
       try {
         const {
           data: { user },
         } = await supabase.auth.getUser()
-
+ 
         if (!user) {
           setIsAdmin(false)
           return
         }
-
+ 
         const { data: profile } =
           await supabase
             .from('profiles')
             .select('role')
             .eq('id', user.id)
             .single()
-
+ 
         setIsAdmin(
           profile?.role === 'admin',
         )
+
       } catch (error) {
         console.error(
           'Failed to load user role:',
           error,
         )
-
+ 
         setIsAdmin(false)
       }
     }
-
+ 
     void loadRole()
   }, [])
-
+ 
   async function handleLogout() {
     const { error } =
       await supabase.auth.signOut()
-
+ 
     if (error) {
       console.error(
         'Logout failed:',
@@ -114,10 +115,10 @@ export default function Sidebar() {
       )
       return
     }
-
+ 
     router.replace('/login')
   }
-
+ 
   return (
     <aside
       className="
@@ -143,7 +144,7 @@ export default function Sidebar() {
       {/* =====================================================
           BRAND
       ===================================================== */}
-
+ 
       <div className="shrink-0">
         <Link
           href="/dashboard"
@@ -177,7 +178,7 @@ export default function Sidebar() {
           >
             T
           </span>
-
+ 
           <span className="max-lg:hidden">
             <span
               className="
@@ -193,7 +194,7 @@ export default function Sidebar() {
             >
               Tynato CRM
             </span>
-
+ 
             <span
               className="
                 block
@@ -211,14 +212,14 @@ export default function Sidebar() {
           </span>
         </Link>
       </div>
-
+ 
       {/* =====================================================
           SCROLLABLE NAVIGATION
           
           Only this section scrolls.
           Footer stays pinned.
       ===================================================== */}
-
+ 
       <nav
         className="
           crm-sidebar-nav
@@ -239,7 +240,7 @@ export default function Sidebar() {
               )) ||
             (menu.href === '/integrations' &&
               pathname.startsWith('/integrations/'))
-
+ 
           return (
             <Link
               key={menu.href}
@@ -268,12 +269,12 @@ export default function Sidebar() {
                 color: active
                   ? '#93c5fd'
                   : 'var(--text-muted)',
-
+ 
                 background:
                   active
                     ? 'rgba(59,130,246,0.15)'
                     : 'transparent',
-
+ 
                 boxShadow:
                   active
                     ? 'inset 0 0 0 1px rgba(96,165,250,0.10)'
@@ -297,7 +298,7 @@ export default function Sidebar() {
                     active
                       ? 'rgba(59,130,246,0.15)'
                       : 'rgba(255,255,255,0.03)',
-
+ 
                   color:
                     active
                       ? '#93c5fd'
@@ -306,7 +307,7 @@ export default function Sidebar() {
               >
                 {menu.icon}
               </span>
-
+ 
               {/* Label */}
               <span
                 className="
@@ -321,13 +322,13 @@ export default function Sidebar() {
           )
         })}
       </nav>
-
+ 
       {/* =====================================================
           FIXED FOOTER ACTIONS
-
+ 
           Notifications → Settings → Logout
       ===================================================== */}
-
+ 
       <div
         className="
           mt-3
@@ -364,18 +365,20 @@ export default function Sidebar() {
             ? 'Administrator'
             : 'Sales Workspace'}
         </div>
-
+ 
+        <PushEnable />
+ 
         {/* ================================
             NOTIFICATIONS
             ================================ */}
-
+ 
         <div className="mb-1">
           <div className="max-lg:hidden">
             <NotificationBell
               placement="up"
             />
           </div>
-
+ 
           <div className="hidden max-lg:block">
             <NotificationBell
               compact
@@ -383,11 +386,11 @@ export default function Sidebar() {
             />
           </div>
         </div>
-
+ 
         {/* ================================
             SETTINGS
             ================================ */}
-
+ 
         <Link
           href="/settings"
           aria-current={
@@ -415,12 +418,12 @@ export default function Sidebar() {
               pathname === '/settings'
                 ? '#93c5fd'
                 : 'var(--text-muted)',
-
+ 
             background:
               pathname === '/settings'
                 ? 'rgba(59,130,246,0.15)'
                 : 'transparent',
-
+ 
             boxShadow:
               pathname === '/settings'
                 ? 'inset 0 0 0 1px rgba(96,165,250,0.10)'
@@ -443,7 +446,7 @@ export default function Sidebar() {
                 pathname === '/settings'
                   ? 'rgba(59,130,246,0.15)'
                   : 'rgba(255,255,255,0.03)',
-
+ 
               color:
                 pathname === '/settings'
                   ? '#93c5fd'
@@ -452,16 +455,16 @@ export default function Sidebar() {
           >
             ⚙
           </span>
-
+ 
           <span className="max-lg:hidden">
             Settings
           </span>
         </Link>
-
+ 
         {/* ================================
             LOGOUT
             ================================ */}
-
+ 
         <button
           type="button"
           onClick={() =>
@@ -502,7 +505,7 @@ export default function Sidebar() {
           >
             ↪
           </span>
-
+ 
           <span className="max-lg:hidden">
             Logout
           </span>

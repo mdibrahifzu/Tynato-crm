@@ -341,7 +341,7 @@ export default function MetaAdsPage() {
               <section className="crm-card overflow-hidden">
                 <div className="flex flex-col gap-2 border-b p-5 sm:flex-row sm:items-center sm:justify-between" style={{ borderColor: "var(--border-soft)" }}>
                   <div><p className="text-xs font-semibold uppercase tracking-[0.14em]" style={{ color: "var(--accent)" }}>CRM lead ingestion</p><h2 className="mt-2 text-lg font-semibold">Meta leads imported into Tynato</h2></div>
-                  <Link href="/custom-lead" className="text-sm font-semibold" style={{ color: "var(--accent)" }}>Open CRM leads →</Link>
+                  <Link href="/leads" className="text-sm font-semibold" style={{ color: "var(--accent)" }}>Open CRM leads →</Link>
                 </div>
                 {metaLeads.length === 0 ? <div className="p-8 text-sm" style={{ color: "var(--text-muted)" }}>No Meta-attributed CRM leads have been imported yet.</div> : (
                   <div className="overflow-x-auto">

@@ -62,44 +62,55 @@ def dashboard(
         }
 
     # ============================================================
-    # SEARCHED LEADS
+    # META LEADS
+    #
+    # Meta leads are stored in custom_leads.
+    # Their source is identified by lead_source_attribution.
     # ============================================================
 
-    searched_params = {}
+    meta_params = {}
 
-    searched_scope = _build_scope(
+    meta_scope = _build_scope(
         current_user,
         team,
-        searched_params,
-        "l",
+        meta_params,
+        "cl",
     )
 
-    searched_conditions = []
+    meta_conditions = []
 
-    if searched_scope:
-        searched_conditions.append(searched_scope)
+    if meta_scope:
+        meta_conditions.append(meta_scope)
 
-    # Normal manually-created leads use search_query = 'manual'.
-    # Everything else in the leads table is treated as a searched lead.
-    searched_conditions.append(
-        "l.search_query IS DISTINCT FROM 'manual'"
+    meta_conditions.append(
+        """
+        EXISTS (
+            SELECT 1
+            FROM public.lead_source_attribution lsa
+            WHERE lsa.lead_id = cl.id
+              AND lsa.source = 'meta'
+        )
+        """
     )
 
-    searched_where = " AND ".join(searched_conditions)
+    meta_where = " AND ".join(meta_conditions)
 
-    searched_leads = db.execute(
+    meta_leads = db.execute(
         text(
             f"""
             SELECT COUNT(*)
-            FROM leads l
-            WHERE {searched_where}
+            FROM public.custom_leads cl
+            WHERE {meta_where}
             """
         ),
-        searched_params,
+        meta_params,
     ).scalar() or 0
 
     # ============================================================
-    # MANUALLY IMPORTED CUSTOM LEADS
+    # MANUAL / NON-META CUSTOM LEADS
+    #
+    # Exclude leads attributed to Meta so they are not counted
+    # in both Meta Leads and Manual Imported.
     # ============================================================
 
     imported_params = {}
@@ -111,18 +122,30 @@ def dashboard(
         "cl",
     )
 
-    imported_where = (
-        f"WHERE {imported_scope}"
-        if imported_scope
-        else ""
+    imported_conditions = []
+
+    if imported_scope:
+        imported_conditions.append(imported_scope)
+
+    imported_conditions.append(
+        """
+        NOT EXISTS (
+            SELECT 1
+            FROM public.lead_source_attribution lsa
+            WHERE lsa.lead_id = cl.id
+              AND lsa.source = 'meta'
+        )
+        """
     )
+
+    imported_where = " AND ".join(imported_conditions)
 
     manual_imported_leads = db.execute(
         text(
             f"""
             SELECT COUNT(*)
-            FROM custom_leads cl
-            {imported_where}
+            FROM public.custom_leads cl
+            WHERE {imported_where}
             """
         ),
         imported_params,
@@ -130,58 +153,34 @@ def dashboard(
 
     # ============================================================
     # TOTAL LEADS
+    #
+    # Total = Meta Leads + non-Meta custom leads.
+    # The legacy searched-lead count is no longer included.
     # ============================================================
 
+    meta_leads = int(meta_leads)
+    manual_imported_leads = int(manual_imported_leads)
+
     total_leads = (
-        searched_leads
-        + manual_imported_leads
+        meta_leads + manual_imported_leads
     )
 
     # ============================================================
     # STATUS COUNTS
     #
-    # Combine:
-    #   searched leads from leads
-    #   +
-    #   manually imported custom leads
+    # Count the CRM pipeline from custom_leads.
+    # This includes Meta and non-Meta custom leads.
     #
     # NULL status is treated as "new".
-    #
-    # Junk and not_interested are returned by the API but are
-    # intentionally not displayed in the dashboard banner.
     # ============================================================
 
     status_params = {}
 
-    searched_status_scope = _build_scope(
-        current_user,
-        team,
-        status_params,
-        "l",
-    )
-
-    custom_status_params = {}
-
     custom_status_scope = _build_scope(
         current_user,
         team,
-        custom_status_params,
+        status_params,
         "cl",
-    )
-
-    searched_status_conditions = []
-
-    if searched_status_scope:
-        searched_status_conditions.append(
-            searched_status_scope
-        )
-
-    searched_status_conditions.append(
-        "l.search_query IS DISTINCT FROM 'manual'"
-    )
-
-    searched_status_where = " AND ".join(
-        searched_status_conditions
     )
 
     custom_status_where = (
@@ -194,26 +193,14 @@ def dashboard(
         text(
             f"""
             SELECT
-                COALESCE(status, 'new') AS status,
+                COALESCE(cl.status, 'new') AS status,
                 COUNT(*) AS count
-            FROM (
-                SELECT l.status
-                FROM leads l
-                WHERE {searched_status_where}
-
-                UNION ALL
-
-                SELECT cl.status
-                FROM custom_leads cl
-                {custom_status_where}
-            ) combined_leads
-            GROUP BY COALESCE(status, 'new')
+            FROM public.custom_leads cl
+            {custom_status_where}
+            GROUP BY COALESCE(cl.status, 'new')
             """
         ),
-        {
-            **status_params,
-            **custom_status_params,
-        },
+        status_params,
     ).mappings().all()
 
     status_counts = {
@@ -233,6 +220,8 @@ def dashboard(
 
     # ============================================================
     # RECENT SEARCHES
+    #
+    # Preserve existing dashboard response behavior.
     # ============================================================
 
     if current_user["role"] == "admin":
@@ -284,9 +273,13 @@ def dashboard(
         ).fetchall()
 
     # ============================================================
-    # EXISTING LEADS DATA
+    # LEGACY LEADS DATA
     #
-    # Keep this so other dashboard functionality does not break.
+    # Retained for compatibility with any existing consumers
+    # of the dashboard response.
+    #
+    # This query does NOT contribute to total_leads or the
+    # pipeline status counts above.
     # ============================================================
 
     leads_params = {}
@@ -329,20 +322,25 @@ def dashboard(
     # ============================================================
 
     response = {
-        # Overall
+        # Overall dashboard metrics
         "total_leads": total_leads,
 
-        # Sources
-        "searched_leads": searched_leads,
+        # Lead sources
+        "meta_leads": meta_leads,
         "manual_imported_leads": manual_imported_leads,
 
-        # Dashboard banner statuses
+        # Backward compatibility for older frontend consumers.
+        # Searched leads are no longer counted.
+        "searched_leads": 0,
+
+        # Dashboard pipeline status counts
         "new": status_counts["new"],
         "interested": status_counts["interested"],
         "follow_up": status_counts["follow_up"],
         "converted": status_counts["converted"],
 
-        # Available to API, but not displayed in banner
+        # Available to the API, even though not shown in the
+        # current status-card layout.
         "not_interested": status_counts["not_interested"],
         "junk": status_counts["junk"],
 
@@ -355,7 +353,10 @@ def dashboard(
         "leads": leads,
     }
 
-    # Existing team information
+    # ============================================================
+    # EXISTING TEAM INFORMATION
+    # ============================================================
+
     if team:
         response.update(
             {

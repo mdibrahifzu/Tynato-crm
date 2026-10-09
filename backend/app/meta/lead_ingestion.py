@@ -1,51 +1,56 @@
 from __future__ import annotations
-
+ 
 import json
-from datetime import datetime
+import re
+from datetime import datetime, timezone
 from typing import Any, Dict, Optional
-
+ 
 from sqlalchemy import text
 from sqlalchemy.orm import Session
-
+ 
 from app.meta.client import MetaClient
 from app.meta.service import get_page_token
 from app.routes.custom_leads import create_custom_lead_record
 from app.routes.notifications import create_in_app_notification
-
-
+ 
+ 
 def _text(value: Any) -> Optional[str]:
     if value is None:
         return None
     value = str(value).strip()
     return value or None
-
-
+ 
+ 
 def _datetime(value: Any):
     value = _text(value)
     if not value:
         return None
+    # Meta sends "+0000"; Python < 3.11 only accepts "+00:00".
+    value = re.sub(
+        r"([+-]\d{2})(\d{2})$",
+        r"\1:\2",
+        value.replace("Z", "+00:00"),
+    )
     try:
-        parsed = datetime.fromisoformat(
-            value.replace("Z", "+00:00")
-        )
+        parsed = datetime.fromisoformat(value)
     except ValueError:
         return None
     return parsed
-
-
+ 
+ 
 def normalize_meta_lead(payload: Dict[str, Any]) -> Dict[str, Any]:
     fields: Dict[str, str] = {}
-
+ 
     for item in payload.get("field_data") or []:
         if not isinstance(item, dict):
             continue
-
+ 
         name = _text(item.get("name"))
         values = item.get("values") or []
-
+ 
         if name and values:
             fields[name.lower()] = str(values[0]).strip()
-
+ 
     full_name = (
         fields.get("full_name")
         or fields.get("name")
@@ -58,7 +63,7 @@ def normalize_meta_lead(payload: Dict[str, Any]) -> Dict[str, Any]:
         ).strip()
         or None
     )
-
+ 
     return {
         "leadgen_id": _text(payload.get("id")),
         "full_name": full_name,
@@ -81,8 +86,8 @@ def normalize_meta_lead(payload: Dict[str, Any]) -> Dict[str, Any]:
         "campaign_id": _text(payload.get("campaign_id")),
         "form_id": _text(payload.get("form_id")),
     }
-
-
+ 
+ 
 def _context(
     db: Session,
     *,
@@ -90,10 +95,12 @@ def _context(
     page_id: str,
     form_id: Optional[str],
     campaign_id: Optional[str],
+    ad_id: Optional[str] = None,
 ):
     form_name = None
     campaign_name = None
-
+    ad_name = None
+ 
     if form_id:
         form_name = db.execute(
             text(
@@ -112,7 +119,7 @@ def _context(
                 "page_id": page_id,
             },
         ).scalar()
-
+ 
     if campaign_id:
         campaign_name = db.execute(
             text(
@@ -130,31 +137,46 @@ def _context(
                 "campaign_id": campaign_id,
             },
         ).scalar()
-
+ 
+    if ad_id:
+        ad_name = db.execute(
+            text(
+                """
+                SELECT name
+                FROM public.meta_ads
+                WHERE team_id = :team_id
+                  AND meta_ad_id = :ad_id
+                LIMIT 1
+                """
+            ),
+            {"team_id": team_id, "ad_id": ad_id},
+        ).scalar()
+ 
     return {
         "form_name": form_name,
         "campaign_name": campaign_name,
+        "ad_name": ad_name,
     }
-
-
+ 
+ 
 def process_meta_lead_job(
     db: Session,
     job: Dict[str, Any],
 ) -> Dict[str, int]:
     payload = job.get("payload") or {}
-
+ 
     event_key = _text(payload.get("event_key"))
     page_id = _text(payload.get("page_id"))
     leadgen_id = _text(payload.get("leadgen_id"))
-
+ 
     if not event_key or not page_id or not leadgen_id:
         raise ValueError(
             "Meta lead job is missing required identifiers."
         )
-
+ 
     team_id = job["team_id"]
     connection_id = job["connection_id"]
-
+ 
     event = db.execute(
         text(
             """
@@ -172,12 +194,12 @@ def process_meta_lead_job(
             "connection_id": connection_id,
         },
     ).mappings().first()
-
+ 
     if not event:
         raise ValueError(
             "Meta webhook event not found."
         )
-
+ 
     existing = db.execute(
         text(
             """
@@ -194,7 +216,7 @@ def process_meta_lead_job(
             "leadgen_id": leadgen_id,
         },
     ).scalar()
-
+ 
     if existing:
         db.execute(
             text(
@@ -209,7 +231,7 @@ def process_meta_lead_job(
             {"event_id": event["id"]},
         )
         return {"created": 0, "duplicate": 1}
-
+ 
     connection = db.execute(
         text(
             """
@@ -226,28 +248,28 @@ def process_meta_lead_job(
             "team_id": team_id,
         },
     ).mappings().first()
-
+ 
     if not connection or not connection["connected_by_user_id"]:
         raise ValueError(
             "No active CRM owner is available for Meta lead assignment."
         )
-
+ 
     token = get_page_token(
         db,
         connection_id,
         team_id,
         page_id,
     )
-
+ 
     meta_lead = MetaClient().lead(
         token,
         leadgen_id,
     )
-
+ 
     normalized = normalize_meta_lead(
         meta_lead
     )
-
+ 
     context = _context(
         db,
         team_id=team_id,
@@ -256,12 +278,15 @@ def process_meta_lead_job(
         or _text(payload.get("form_id")),
         campaign_id=normalized["campaign_id"]
         or _text(payload.get("campaign_id")),
+        ad_id=normalized["ad_id"]
+        or _text(payload.get("ad_id")),
     )
-
+ 
     lead = create_custom_lead_record(
         db,
         team_id=team_id,
         owner_id=connection["connected_by_user_id"],
+        ad_name=context["ad_name"],
         form_name=context["form_name"],
         full_name=normalized["full_name"],
         phone_number=normalized["phone_number"],
@@ -269,7 +294,7 @@ def process_meta_lead_job(
         project_location=normalized["project_location"],
         created_time=normalized["created_time"],
     )
-
+ 
     campaign_id = (
         normalized["campaign_id"]
         or _text(payload.get("campaign_id"))
@@ -286,7 +311,7 @@ def process_meta_lead_job(
         normalized["form_id"]
         or _text(payload.get("form_id"))
     )
-
+ 
     db.execute(
         text(
             """
@@ -340,14 +365,9 @@ def process_meta_lead_job(
             "meta_created_at": normalized["created_time"],
         },
     )
-
-    dedupe_key = (
-        "meta-lead:{}:{}".format(
-            team_id,
-            leadgen_id,
-        )
-    )
-
+ 
+    base_key = "meta-lead:{}:{}".format(team_id, leadgen_id)
+ 
     metadata = {
         "source": "meta",
         "meta_lead_id": leadgen_id,
@@ -357,72 +377,96 @@ def process_meta_lead_job(
         "adset_id": adset_id,
         "ad_id": ad_id,
     }
-
-    create_in_app_notification(
-        db,
-        team_id=team_id,
-        user_id=connection["connected_by_user_id"],
-        notification_type="meta_lead",
-        title="New Meta Lead",
-        message=(
-            normalized["full_name"]
-            or normalized["phone_number"]
-            or "New lead received from Meta"
-        ),
-        entity_type="custom_lead",
-        entity_id=lead["id"],
-        metadata=metadata,
-        dedupe_key=dedupe_key,
+ 
+    display = (
+        normalized["full_name"]
+        or normalized["phone_number"]
+        or "New lead received from Meta"
     )
-
-    db.execute(
+ 
+    # Connector (owner) + every active team member.
+    recipients = db.execute(
         text(
             """
-            INSERT INTO public.web_push_outbox (
-                event_key,
-                user_id,
-                subscription_id,
-                provider,
-                title,
-                body,
-                payload
-            )
-            SELECT
-                :event_key,
-                d.user_id,
-                d.id,
-                'webpush',
-                :title,
-                :body,
-                CAST(:payload AS jsonb)
-            FROM public.web_push_subscriptions d
-            WHERE d.user_id = :user_id
-              AND d.team_id = :team_id
-              AND d.is_active = TRUE
-            ON CONFLICT (event_key, subscription_id)
-            DO NOTHING
+            SELECT CAST(:owner AS uuid) AS user_id
+            UNION
+            SELECT tm.member_id
+            FROM public.team_members tm
+            WHERE tm.team_id = :team_id
+              AND tm.status = 'active'
+              AND tm.member_id IS NOT NULL
             """
         ),
         {
-            "event_key": dedupe_key,
-            "user_id": connection["connected_by_user_id"],
+            "owner": str(connection["connected_by_user_id"]),
             "team_id": team_id,
-            "title": "New Meta Lead",
-            "body": (
-                normalized["full_name"]
-                or normalized["phone_number"]
-                or "New lead received from Meta"
-            ),
-            "payload": json.dumps(
-                {
-                    "type": "meta_lead",
-                    "lead_id": str(lead["id"]),
-                    "target_url": "/",
-                }
-            ),
         },
-    )
-
+    ).scalars().all()
+ 
+    # Backfilled (older) leads are imported silently: no bell, no push.
+    created = normalized["created_time"]
+    is_recent = created is None or (
+        datetime.now(timezone.utc) - created
+    ).total_seconds() < 86400
+ 
+    for user_id in recipients if is_recent else []:
+        dedupe_key = "{}:{}".format(base_key, user_id)
+ 
+        create_in_app_notification(
+            db,
+            team_id=team_id,
+            user_id=user_id,
+            notification_type="LEAD_META",
+            title="New Meta Lead",
+            message=display,
+            entity_type="custom_lead",
+            entity_id=lead["id"],
+            metadata=metadata,
+            dedupe_key=dedupe_key,
+        )
+ 
+        db.execute(
+            text(
+                """
+                INSERT INTO public.web_push_outbox (
+                    event_key,
+                    user_id,
+                    subscription_id,
+                    provider,
+                    title,
+                    body,
+                    payload
+                )
+                SELECT
+                    :event_key,
+                    d.user_id,
+                    d.id,
+                    'webpush',
+                    :title,
+                    :body,
+                    CAST(:payload AS jsonb)
+                FROM public.web_push_subscriptions d
+                WHERE d.user_id = :user_id
+                  AND d.is_active = TRUE
+                ON CONFLICT (event_key, subscription_id)
+                DO NOTHING
+                """
+            ),
+            {
+                "event_key": dedupe_key,
+                "user_id": user_id,
+                "title": "New Meta Lead",
+                "body": display,
+                "payload": json.dumps(
+                    {
+                        "type": "meta_lead",
+                        "lead_id": str(lead["id"]),
+                        "target_url": "/leads",
+                    }
+                ),
+            },
+        )
+ 
     db.execute(
         text(
             """
@@ -435,11 +479,12 @@ def process_meta_lead_job(
         ),
         {"event_id": event["id"]},
     )
-
+ 
     return {"created": 1, "duplicate": 0}
-
-
+ 
+ 
 __all__ = [
     "normalize_meta_lead",
     "process_meta_lead_job",
 ]
+ 

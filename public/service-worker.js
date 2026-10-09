@@ -1,3 +1,11 @@
+self.addEventListener("install", (event) => {
+  event.waitUntil(self.skipWaiting());
+});
+
+self.addEventListener("activate", (event) => {
+  event.waitUntil(self.clients.claim());
+});
+
 
 self.addEventListener("push", (event) => {
   let data = {};
@@ -20,7 +28,7 @@ self.addEventListener("push", (event) => {
       renotify: true,
       data: {
         lead_id: data.lead_id || null,
-        target_url: data.target_url || "/",
+        target_url: data.target_url || "/custom-lead",
       },
     })
   );
@@ -30,7 +38,7 @@ self.addEventListener("notificationclick", (event) => {
   event.notification.close();
 
   const targetUrl =
-    event.notification?.data?.target_url || "/";
+    event.notification?.data?.target_url || "/custom-lead";
 
   event.waitUntil(
     clients.matchAll({

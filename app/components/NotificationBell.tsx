@@ -67,6 +67,9 @@ function targetFor(item: NotificationItem) {
       return `/leads/${item.entity_id}`
 
     case 'custom_lead':
+        if (['LEAD_FOLLOW_UP', 'LEAD_ASSIGNED'].includes(item.type.toUpperCase())) {
+        return '/custom-lead'
+      }
       return `/audio?custom_lead_id=${item.entity_id}`
 
     case 'audio':
@@ -93,12 +96,86 @@ export default function NotificationBell({
   const [items, setItems] = useState<NotificationItem[]>([])
   const [open, setOpen] = useState(false)
   const [loading, setLoading] = useState(false)
+  const [toastItem, setToastItem] = useState<NotificationItem | null>(null)
+
+  const initializedNotifications = useRef(false)
+  const knownNotificationIds = useRef<Set<string>>(new Set())
 
   const wrapperRef = useRef<HTMLDivElement | null>(null)
 
   const countRequestInFlight = useRef(false)
   const previewRequestInFlight = useRef(false)
-  const lastFocusRefresh = useRef(0)
+    const lastFocusRefresh = useRef(0)
+  const lastCount = useRef(0)
+  const countInitialized = useRef(false)
+  const openRef = useRef(false)
+
+
+
+    const loadPreview = useCallback(
+    async (showNewToast = true, showSpinner = false) => {
+      if (previewRequestInFlight.current) {
+        return
+      }
+
+      previewRequestInFlight.current = true
+
+      if (showSpinner) {
+        setLoading(true)
+      }
+
+      try {
+        const response = await apiFetch('/notifications?limit=8')
+
+        if (!response.ok) {
+          return
+        }
+
+        const data = await response.json()
+        const nextItems = Array.isArray(data)
+          ? (data as NotificationItem[])
+          : []
+
+        if (initializedNotifications.current && showNewToast) {
+          const newest = nextItems.find(
+            (item) =>
+              !item.is_read &&
+              !knownNotificationIds.current.has(item.id),
+          )
+
+          if (newest) {
+            setToastItem(newest)
+          }
+        }
+
+        knownNotificationIds.current = new Set(
+          nextItems.map((item) => item.id),
+        )
+        initializedNotifications.current = true
+
+        setItems((prev) => {
+          const same =
+            prev.length === nextItems.length &&
+            prev.every(
+              (entry, index) =>
+                entry.id === nextItems[index].id &&
+                entry.is_read === nextItems[index].is_read,
+            )
+
+          return same ? prev : nextItems
+        })
+      } catch (error) {
+        console.error('Notification preview failed:', error)
+      } finally {
+        previewRequestInFlight.current = false
+
+        if (showSpinner) {
+          setLoading(false)
+        }
+      }
+    },
+    [],
+  )
 
   const refreshCount = useCallback(async () => {
     if (countRequestInFlight.current) {
@@ -115,122 +192,102 @@ export default function NotificationBell({
     countRequestInFlight.current = true
 
     try {
-      const response = await apiFetch(
-        '/notifications/unread-count',
-      )
+      const response = await apiFetch('/notifications/unread-count')
 
       if (!response.ok) {
         return
       }
 
       const data = await response.json()
+      const next = Number(data?.count ?? 0)
+      const previous = lastCount.current
 
-      setCount(
-        Number(
-          data?.count ?? 0,
-        ),
-      )
+      lastCount.current = next
+      setCount(next)
+
+      if (!countInitialized.current) {
+        countInitialized.current = true
+        return
+      }
+
+      if (next > previous) {
+        // A new notification arrived: fetch the list and show the toast.
+        void loadPreview(true)
+      } else if (next !== previous && openRef.current) {
+        // Count changed while the panel is open: refresh quietly.
+        void loadPreview(false)
+      }
     } catch (error) {
-      /*
-       * Notification polling must never break the CRM.
-       * Network failures are ignored here.
-       */
-      console.error(
-        'Notification count failed:',
-        error,
-      )
+      console.error('Notification count failed:', error)
     } finally {
       countRequestInFlight.current = false
     }
-  }, [])
+  }, [loadPreview])
 
-  const loadPreview = useCallback(async () => {
-    if (previewRequestInFlight.current) {
-      return
-    }
-
-    previewRequestInFlight.current = true
-    setLoading(true)
-
-    try {
-      const response = await apiFetch(
-        '/notifications?limit=8',
-      )
-
-      if (!response.ok) {
-        return
-      }
-
-      const data = await response.json()
-
-      setItems(
-        Array.isArray(data)
-          ? data
-          : [],
-      )
-    } catch (error) {
-      console.error(
-        'Notification preview failed:',
-        error,
-      )
-    } finally {
-      previewRequestInFlight.current = false
-      setLoading(false)
-    }
-  }, [])
+    useEffect(() => {
+    openRef.current = open
+  }, [open])
 
   useEffect(() => {
-    /*
-     * Initial count.
-     */
     void refreshCount()
+    void loadPreview(false)
 
-    /*
-     * Production polling:
-     * once every 60 seconds.
-     */
-    const timer = window.setInterval(
-      () => {
-        void refreshCount()
-      },
-      60_000,
-    )
+    // Only the cheap unread-count endpoint is polled.
+    const timer = window.setInterval(() => {
+      void refreshCount()
+    }, 15_000)
 
-    /*
-     * Refresh when the user returns
-     * to the browser tab.
-     *
-     * Guard against repeated focus events.
-     */
     const onFocus = () => {
       const now = Date.now()
 
-      if (
-        now - lastFocusRefresh.current <
-        5_000
-      ) {
+      if (now - lastFocusRefresh.current < 5_000) {
         return
       }
 
       lastFocusRefresh.current = now
-
       void refreshCount()
     }
 
-    window.addEventListener(
-      'focus',
-      onFocus,
-    )
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') {
+        void refreshCount()
+      }
+    }
+
+    window.addEventListener('focus', onFocus)
+    document.addEventListener('visibilitychange', onVisible)
 
     return () => {
       window.clearInterval(timer)
-
-      window.removeEventListener(
-        'focus',
-        onFocus,
-      )
+      window.removeEventListener('focus', onFocus)
+      document.removeEventListener('visibilitychange', onVisible)
     }
-  }, [refreshCount])
+  }, [loadPreview, refreshCount])
+
+  useEffect(() => {
+    if (typeof navigator === 'undefined' || !('serviceWorker' in navigator)) {
+      return
+    }
+
+    void navigator.serviceWorker
+      .register('/service-worker.js', { scope: '/' })
+      .then((registration) => registration.update())
+      .catch((error) => {
+        console.error('Service worker registration failed:', error)
+      })
+  }, [])
+
+  useEffect(() => {
+    if (!toastItem) {
+      return
+    }
+
+    const timer = window.setTimeout(() => {
+      setToastItem(null)
+    }, 8_000)
+
+    return () => window.clearTimeout(timer)
+  }, [toastItem])
 
   useEffect(() => {
     const onOutside = (
@@ -275,7 +332,7 @@ export default function NotificationBell({
      * Do NOT call refreshCount() again here.
      * The polling/focus logic already handles count refresh.
      */
-    await loadPreview()
+        await loadPreview(false, items.length === 0)
   }
 
   const markRead = async (
@@ -310,9 +367,8 @@ export default function NotificationBell({
         ),
       )
 
-      setCount((prev) =>
-        Math.max(0, prev - 1),
-      )
+      lastCount.current = Math.max(0, lastCount.current - 1)
+      setCount((prev) => Math.max(0, prev - 1))
     } catch (error) {
       console.error(
         'Mark notification read failed:',
@@ -327,6 +383,43 @@ export default function NotificationBell({
       : 'top-[calc(100%+8px)]'
 
   return (
+    <>
+      {toastItem && (
+        <button
+          type="button"
+          onClick={() => {
+            const href = targetFor(toastItem)
+            void markRead(toastItem)
+            setToastItem(null)
+            if (href) {
+              window.location.href = href
+            }
+          }}
+          className="fixed right-4 top-4 z-[200] w-[min(380px,calc(100vw-32px))] rounded-2xl border p-4 text-left shadow-2xl"
+          style={{
+            background: 'var(--bg-card)',
+            borderColor: 'var(--border-soft)',
+            color: 'var(--text-primary)',
+          }}
+          aria-label="New notification"
+        >
+          <div className="flex items-start gap-3">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full" style={{ background: 'var(--bg-surface)' }}>
+              {iconFor(toastItem.type)}
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block text-sm font-semibold">{toastItem.title}</span>
+              <span className="mt-1 block text-xs leading-5" style={{ color: 'var(--text-muted)' }}>
+                {toastItem.message}
+              </span>
+              <span className="mt-2 block text-[11px] font-semibold" style={{ color: 'var(--accent)' }}>
+                Open Custom Lead →
+              </span>
+            </span>
+          </div>
+        </button>
+      )}
+
     <div
       ref={wrapperRef}
       className="relative w-full"
@@ -621,5 +714,6 @@ export default function NotificationBell({
         </div>
       )}
     </div>
+    </>
   )
 }

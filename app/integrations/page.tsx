@@ -2,8 +2,13 @@
 
 import Link from "next/link"
 import Sidebar from "@/app/components/Sidebar"
+import { useEffect } from "react"
+import { apiFetch } from "@/app/lib/api"
 
 export default function IntegrationsPage() {
+    useEffect(() => {
+    void apiFetch("/meta/sync-now", { method: "POST" }).catch(() => {})
+  }, [])
   return (
     <div className="min-h-screen" style={{ background: "var(--bg-main)", color: "var(--text-primary)" }}>
       <div className="flex min-h-screen">

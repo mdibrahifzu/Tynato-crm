@@ -581,6 +581,7 @@ def sync_campaigns(
     token: str,
     ad_account_row_id: Optional[UUID] = None,
 ) -> Dict[str, int]:
+    """Sync the complete Meta advertising hierarchy for the selected accounts."""
     provider = get_meta_provider()
     accounts = _ad_accounts_for_connection(
         db,
@@ -590,14 +591,21 @@ def sync_campaigns(
     )
 
     campaign_count = 0
+    adset_count = 0
+    ad_count = 0
+
     for account in accounts:
-        campaigns = provider.campaigns(token, account["meta_ad_account_id"])
+        account_row_id = account["id"]
+        meta_account_id = account["meta_ad_account_id"]
+
+        # 1) Campaigns must be present before Ad Sets so the FK can be resolved.
+        campaigns = provider.campaigns(token, meta_account_id)
         for item in campaigns:
-            external_id = str(item.get("id") or "")
-            name = str(item.get("name") or external_id)
+            external_id = str(item.get("id") or "").strip()
             if not external_id:
                 continue
 
+            name = str(item.get("name") or external_id)
             db.execute(
                 text(
                     """
@@ -649,7 +657,7 @@ def sync_campaigns(
                 ),
                 {
                     "connection_id": connection_id,
-                    "ad_account_row_id": account["id"],
+                    "ad_account_row_id": account_row_id,
                     "team_id": team_id,
                     "meta_campaign_id": external_id,
                     "name": name,
@@ -663,6 +671,210 @@ def sync_campaigns(
                 },
             )
             campaign_count += 1
+
+        # 2) Ad Sets.
+        adsets = provider.adsets(token, meta_account_id)
+
+        campaign_rows = db.execute(
+            text(
+                """
+                SELECT id, meta_campaign_id
+                FROM meta_campaigns
+                WHERE ad_account_row_id = :ad_account_row_id
+                  AND connection_id = :connection_id
+                  AND team_id = :team_id
+                """
+            ),
+            {
+                "ad_account_row_id": account_row_id,
+                "connection_id": connection_id,
+                "team_id": team_id,
+            },
+        ).mappings().all()
+        campaign_by_meta_id = {
+            str(row["meta_campaign_id"]): row["id"]
+            for row in campaign_rows
+            if row["meta_campaign_id"]
+        }
+
+        for item in adsets:
+            external_id = str(item.get("id") or "").strip()
+            if not external_id:
+                continue
+
+            meta_campaign_id = str(item.get("campaign_id") or "").strip() or None
+            campaign_row_id = campaign_by_meta_id.get(meta_campaign_id)
+
+            db.execute(
+                text(
+                    """
+                    INSERT INTO meta_adsets (
+                        connection_id,
+                        ad_account_row_id,
+                        campaign_row_id,
+                        team_id,
+                        meta_adset_id,
+                        meta_campaign_id,
+                        name,
+                        status,
+                        optimization_goal,
+                        billing_event,
+                        start_time,
+                        end_time,
+                        raw_data,
+                        last_seen_at
+                    )
+                    VALUES (
+                        :connection_id,
+                        :ad_account_row_id,
+                        :campaign_row_id,
+                        :team_id,
+                        :meta_adset_id,
+                        :meta_campaign_id,
+                        :name,
+                        :status,
+                        :optimization_goal,
+                        :billing_event,
+                        :start_time,
+                        :end_time,
+                        CAST(:raw_data AS JSONB),
+                        NOW()
+                    )
+                    ON CONFLICT (ad_account_row_id, meta_adset_id)
+                    DO UPDATE SET
+                        connection_id = EXCLUDED.connection_id,
+                        team_id = EXCLUDED.team_id,
+                        campaign_row_id = EXCLUDED.campaign_row_id,
+                        meta_campaign_id = EXCLUDED.meta_campaign_id,
+                        name = EXCLUDED.name,
+                        status = EXCLUDED.status,
+                        optimization_goal = EXCLUDED.optimization_goal,
+                        billing_event = EXCLUDED.billing_event,
+                        start_time = EXCLUDED.start_time,
+                        end_time = EXCLUDED.end_time,
+                        raw_data = EXCLUDED.raw_data,
+                        last_seen_at = NOW(),
+                        updated_at = NOW()
+                    """
+                ),
+                {
+                    "connection_id": connection_id,
+                    "ad_account_row_id": account_row_id,
+                    "campaign_row_id": campaign_row_id,
+                    "team_id": team_id,
+                    "meta_adset_id": external_id,
+                    "meta_campaign_id": meta_campaign_id,
+                    "name": str(item.get("name") or external_id),
+                    "status": item.get("status"),
+                    "optimization_goal": item.get("optimization_goal"),
+                    "billing_event": item.get("billing_event"),
+                    "start_time": _parse_datetime(item.get("start_time")),
+                    "end_time": _parse_datetime(item.get("end_time")),
+                    "raw_data": json.dumps(item),
+                },
+            )
+            adset_count += 1
+
+        # 3) Ads.
+        ads = provider.ads(token, meta_account_id)
+
+        adset_rows = db.execute(
+            text(
+                """
+                SELECT id, meta_adset_id
+                FROM meta_adsets
+                WHERE ad_account_row_id = :ad_account_row_id
+                  AND connection_id = :connection_id
+                  AND team_id = :team_id
+                """
+            ),
+            {
+                "ad_account_row_id": account_row_id,
+                "connection_id": connection_id,
+                "team_id": team_id,
+            },
+        ).mappings().all()
+        adset_by_meta_id = {
+            str(row["meta_adset_id"]): row["id"]
+            for row in adset_rows
+            if row["meta_adset_id"]
+        }
+
+        for item in ads:
+            external_id = str(item.get("id") or "").strip()
+            if not external_id:
+                continue
+
+            meta_adset_id = str(item.get("adset_id") or "").strip() or None
+            meta_campaign_id = str(item.get("campaign_id") or "").strip() or None
+            adset_row_id = adset_by_meta_id.get(meta_adset_id)
+
+            creative = item.get("creative")
+            creative_id = None
+            if isinstance(creative, dict):
+                creative_id = str(creative.get("id") or "").strip() or None
+
+            db.execute(
+                text(
+                    """
+                    INSERT INTO meta_ads (
+                        connection_id,
+                        ad_account_row_id,
+                        adset_row_id,
+                        team_id,
+                        meta_ad_id,
+                        meta_adset_id,
+                        meta_campaign_id,
+                        creative_id,
+                        name,
+                        status,
+                        raw_data,
+                        last_seen_at
+                    )
+                    VALUES (
+                        :connection_id,
+                        :ad_account_row_id,
+                        :adset_row_id,
+                        :team_id,
+                        :meta_ad_id,
+                        :meta_adset_id,
+                        :meta_campaign_id,
+                        :creative_id,
+                        :name,
+                        :status,
+                        CAST(:raw_data AS JSONB),
+                        NOW()
+                    )
+                    ON CONFLICT (ad_account_row_id, meta_ad_id)
+                    DO UPDATE SET
+                        connection_id = EXCLUDED.connection_id,
+                        team_id = EXCLUDED.team_id,
+                        adset_row_id = EXCLUDED.adset_row_id,
+                        meta_adset_id = EXCLUDED.meta_adset_id,
+                        meta_campaign_id = EXCLUDED.meta_campaign_id,
+                        creative_id = EXCLUDED.creative_id,
+                        name = EXCLUDED.name,
+                        status = EXCLUDED.status,
+                        raw_data = EXCLUDED.raw_data,
+                        last_seen_at = NOW(),
+                        updated_at = NOW()
+                    """
+                ),
+                {
+                    "connection_id": connection_id,
+                    "ad_account_row_id": account_row_id,
+                    "adset_row_id": adset_row_id,
+                    "team_id": team_id,
+                    "meta_ad_id": external_id,
+                    "meta_adset_id": meta_adset_id,
+                    "meta_campaign_id": meta_campaign_id,
+                    "creative_id": creative_id,
+                    "name": str(item.get("name") or external_id),
+                    "status": item.get("status"),
+                    "raw_data": json.dumps(item),
+                },
+            )
+            ad_count += 1
 
     db.execute(
         text(
@@ -682,8 +894,9 @@ def sync_campaigns(
     return {
         "ad_accounts": len(accounts),
         "campaigns": campaign_count,
+        "adsets": adset_count,
+        "ads": ad_count,
     }
-
 
 def enqueue_campaign_sync(
     db: Session,
