@@ -124,6 +124,7 @@ export default function Sidebar() {
       className="
         sticky
         top-0
+        z-[120]
         flex
         h-screen
         w-[250px]
