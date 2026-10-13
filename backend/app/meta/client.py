@@ -1,7 +1,7 @@
 from typing import Any, Dict, List, Optional
-
+ 
 import httpx
-
+ 
 from app.meta.config import (
     META_API_VERSION,
     META_APP_ID,
@@ -10,18 +10,18 @@ from app.meta.config import (
     META_HTTP_TIMEOUT_SECONDS,
     META_REDIRECT_URI,
 )
-
-
+ 
+ 
 class MetaAPIError(RuntimeError):
     def __init__(self, message: str, status_code: int = 502):
         super().__init__(message)
         self.status_code = status_code
-
-
+ 
+ 
 class MetaClient:
     def __init__(self) -> None:
         self.timeout = httpx.Timeout(META_HTTP_TIMEOUT_SECONDS)
-
+ 
     def _request(
         self,
         method: str,
@@ -32,9 +32,9 @@ class MetaClient:
         headers = {"Accept": "application/json"}
         if token:
             headers["Authorization"] = "Bearer {}".format(token)
-
+ 
         url = "{}{}".format(META_GRAPH_BASE_URL, path)
-
+ 
         try:
             with httpx.Client(
                 timeout=self.timeout,
@@ -51,21 +51,21 @@ class MetaClient:
                 "Meta API is temporarily unavailable",
                 502,
             ) from exc
-
+ 
         try:
             body = response.json()
         except ValueError:
             body = {}
-
+ 
         if response.status_code >= 400:
             # Never return Meta's raw error body to the CRM client.
             raise MetaAPIError(
                 "Meta API request failed",
                 response.status_code,
             )
-
+ 
         return body
-
+ 
     def _paged_request(
         self,
         path: str,
@@ -76,15 +76,15 @@ class MetaClient:
         """Read a cursor-paginated Meta edge without following tokenized next URLs."""
         base_params = dict(params or {})
         base_params.setdefault("limit", 100)
-
+ 
         items: List[Dict[str, Any]] = []
         after: Optional[str] = None
-
+ 
         for _ in range(max_pages):
             page_params = dict(base_params)
             if after:
                 page_params["after"] = after
-
+ 
             body = self._request(
                 "GET",
                 path,
@@ -96,7 +96,7 @@ class MetaClient:
                 items.extend(
                     item for item in page_items if isinstance(item, dict)
                 )
-
+ 
             paging = body.get("paging") or {}
             cursors = paging.get("cursors") or {}
             next_after = cursors.get("after")
@@ -108,9 +108,9 @@ class MetaClient:
                 "Meta API pagination limit reached",
                 502,
             )
-
+ 
         return items
-
+ 
     def exchange_code(self, code: str) -> Dict[str, Any]:
         initial = self._request(
             "GET",
@@ -122,18 +122,18 @@ class MetaClient:
                 "code": code,
             },
         )
-
+ 
         token = initial.get("access_token")
         if not token:
             raise MetaAPIError(
                 "Meta did not return an access token",
                 502,
             )
-
+ 
         initial_expires_in = initial.get("expires_in")
         if not initial_expires_in:
             return {"access_token": token, "expires_in": None}
-
+ 
         try:
             long_lived = self._request(
                 "GET",
@@ -152,12 +152,12 @@ class MetaClient:
                     "expires_in": initial_expires_in,
                 }
             raise
-
+ 
         return {
             "access_token": long_lived.get("access_token") or token,
             "expires_in": long_lived.get("expires_in") or initial_expires_in,
         }
-
+ 
     def me(self, token: str) -> Dict[str, Any]:
         return self._request(
             "GET",
@@ -165,7 +165,7 @@ class MetaClient:
             token=token,
             params={"fields": "id,name"},
         )
-
+ 
     def permissions(self, token: str) -> List[str]:
         try:
             result = self._request(
@@ -180,7 +180,7 @@ class MetaClient:
             if exc.status_code not in {400, 404}:
                 raise
             return []
-
+ 
         granted: List[str] = []
         for item in result.get("data", []):
             if (
@@ -189,23 +189,23 @@ class MetaClient:
                 and item.get("permission")
             ):
                 granted.append(str(item["permission"]))
-
+ 
         return granted
-
+ 
     def businesses(self, token: str) -> List[Dict[str, Any]]:
         return self._paged_request(
             "/me/businesses",
             token,
             {"fields": "id,name"},
         )
-
+ 
     def pages(self, token: str) -> List[Dict[str, Any]]:
         return self._paged_request(
             "/me/accounts",
             token,
             {"fields": "id,name,category,access_token"},
         )
-
+ 
     def ad_accounts(self, token: str) -> List[Dict[str, Any]]:
         return self._paged_request(
             "/me/adaccounts",
@@ -217,7 +217,7 @@ class MetaClient:
                 )
             },
         )
-
+ 
     def campaigns(
         self,
         token: str,
@@ -234,7 +234,7 @@ class MetaClient:
                 )
             },
         )
-
+ 
     def adsets(
         self,
         token: str,
@@ -251,7 +251,7 @@ class MetaClient:
                 )
             },
         )
-
+ 
     def ads(
         self,
         token: str,
@@ -267,7 +267,7 @@ class MetaClient:
                 )
             },
         )
-
+ 
     def lead(
         self,
         token: str,
@@ -276,7 +276,7 @@ class MetaClient:
         leadgen_id = str(leadgen_id or "").strip()
         if not leadgen_id:
             raise ValueError("Meta lead ID is required")
-
+ 
         return self._request(
             "GET",
             "/{}".format(leadgen_id),
@@ -288,7 +288,7 @@ class MetaClient:
                 )
             },
         )
-
+ 
     def leadgen_forms(
         self,
         token: str,
@@ -297,7 +297,7 @@ class MetaClient:
         page_id = str(page_id or "").strip()
         if not page_id:
             raise ValueError("Meta Page ID is required")
-
+ 
         return self._paged_request(
             "/{}/leadgen_forms".format(page_id),
             token,
@@ -308,7 +308,19 @@ class MetaClient:
                 )
             },
         )
-
+ 
+    def subscribe_page(self, token: str, page_id: str) -> Dict[str, Any]:
+        page_id = str(page_id or "").strip()
+        if not page_id:
+            raise ValueError("Meta Page ID is required")
+ 
+        return self._request(
+            "POST",
+            "/{}/subscribed_apps".format(page_id),
+            token=token,
+            params={"subscribed_fields": "leadgen"},
+        )
+ 
     def insights(
         self,
         token: str,
@@ -326,3 +338,4 @@ class MetaClient:
                 )
             },
         )
+ 

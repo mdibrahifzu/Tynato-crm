@@ -29,6 +29,9 @@ const inputClass =
 export default function SettingsPage() {
   const [email, setEmail] = useState('')
   const [fullName, setFullName] = useState('')
+  const [savingProfile, setSavingProfile] = useState(false)
+  const [profileError, setProfileError] = useState('')
+  const [profileSuccess, setProfileSuccess] = useState('')
 
   const [business, setBusiness] = useState<BusinessSettings | null>(null)
   const [businessName, setBusinessName] = useState('')
@@ -60,13 +63,27 @@ export default function SettingsPage() {
 
       setEmail(user.email || '')
 
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('full_name')
-        .eq('id', user.id)
-        .single()
+      try {
+        // Read the canonical CRM profile through the authenticated backend.
+        // This does not depend on browser-side profiles-table RLS policies.
+        const response = await apiFetch('/profile/me')
+        const profile = await response.json().catch(() => null)
+        if (!response.ok) {
+          throw new Error(profile?.detail || 'Unable to load your CRM profile name.')
+        }
 
-      if (mounted) setFullName(profile?.full_name || '')
+        const profileName = typeof profile?.full_name === 'string' ? profile.full_name.trim() : ''
+        const metadataName = user.user_metadata?.full_name
+        const fallbackName = typeof metadataName === 'string' ? metadataName.trim() : ''
+        if (mounted) setFullName(profileName || fallbackName)
+      } catch (error) {
+        const metadataName = user.user_metadata?.full_name
+        const fallbackName = typeof metadataName === 'string' ? metadataName.trim() : ''
+        if (mounted) {
+          setFullName(fallbackName)
+          setProfileError(error instanceof Error ? error.message : 'Unable to load your CRM profile name.')
+        }
+      }
 
       const {
         data: identityData,
@@ -90,6 +107,55 @@ export default function SettingsPage() {
       mounted = false
     }
   }, [])
+
+  async function saveProfileName() {
+    if (savingProfile) return
+
+    const cleanName = fullName.trim()
+    if (!cleanName) {
+      setProfileError('Please enter your full name.')
+      setProfileSuccess('')
+      return
+    }
+    if (cleanName.length > 120) {
+      setProfileError('Full name must be 120 characters or fewer.')
+      setProfileSuccess('')
+      return
+    }
+
+    setSavingProfile(true)
+    setProfileError('')
+    setProfileSuccess('')
+
+    try {
+      const response = await apiFetch('/profile/me', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ full_name: cleanName }),
+      })
+      const data = await response.json().catch(() => null)
+      if (!response.ok) {
+        throw new Error(data?.detail || 'Unable to save your profile name.')
+      }
+
+      const savedName = typeof data?.full_name === 'string' ? data.full_name : cleanName
+      setFullName(savedName)
+
+      // Auth metadata is a fallback only; the profiles row is canonical.
+      const { error: metadataError } = await supabase.auth.updateUser({
+        data: { full_name: savedName },
+      })
+      setProfileSuccess(
+        metadataError
+          ? 'Name saved to your CRM profile. Auth metadata could not be synchronized.'
+          : 'Name saved successfully.'
+      )
+    } catch (error) {
+      setProfileError(error instanceof Error ? error.message : 'Unable to save your profile name.')
+    } finally {
+      setSavingProfile(false)
+    }
+  }
 
   useEffect(() => {
     let mounted = true
@@ -402,17 +468,50 @@ export default function SettingsPage() {
                 </div>
               </div>
 
-              <div className="rounded-xl border border-white/10 bg-black/20 px-4 py-3">
-                <div className="text-xs uppercase tracking-wide text-white/35">
-                  Name
-                </div>
-                <div className="mt-1 text-sm font-medium text-white">
-                  {fullName || 'Not set'}
-                </div>
+              <div>
+                <label htmlFor="profile-full-name" className="mb-2 block text-xs uppercase tracking-wide text-white/45">
+                  Full Name
+                </label>
+                <input
+                  id="profile-full-name"
+                  type="text"
+                  value={fullName}
+                  onChange={(event) => setFullName(event.target.value)}
+                  maxLength={120}
+                  autoComplete="name"
+                  disabled={savingProfile}
+                  placeholder="Enter your full name"
+                  className={inputClass}
+                />
               </div>
             </div>
 
-            <p className="mt-4 text-xs text-white/35">
+            {profileError && (
+              <div role="alert" className="mt-4 rounded-xl border border-rose-400/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
+                {profileError}
+              </div>
+            )}
+            {profileSuccess && (
+              <div role="status" className="mt-4 rounded-xl border border-emerald-400/20 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200">
+                {profileSuccess}
+              </div>
+            )}
+
+            <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <p className="text-xs text-white/35">
+                Your name is used to identify you in internal sales-call booking records.
+              </p>
+              <button
+                type="button"
+                onClick={() => void saveProfileName()}
+                disabled={savingProfile}
+                className="rounded-xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {savingProfile ? 'Saving Name…' : 'Save Name'}
+              </button>
+            </div>
+
+            <p className="mt-3 text-xs text-white/35">
               Login email changes are handled separately from your invoice business email.
             </p>
           </section>

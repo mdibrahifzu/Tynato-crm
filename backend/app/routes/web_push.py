@@ -1,39 +1,40 @@
 from __future__ import annotations
-
+ 
 import datetime as dt
 import os
-
-from fastapi import APIRouter, Depends, HTTPException
+from typing import Optional
+ 
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import text
 from sqlalchemy.orm import Session
-
+ 
 from app.dependencies import get_current_user, get_current_team, get_db
-
-
+ 
+ 
 WEB_PUSH_VAPID_PUBLIC_KEY = os.getenv(
     "WEB_PUSH_VAPID_PUBLIC_KEY",
     "",
 ).strip()
-
-
+ 
+ 
 router = APIRouter(
     prefix="/web-push",
     tags=["Web Push"],
 )
-
-
+ 
+ 
 class PushSubscriptionKeys(BaseModel):
     p256dh: str = Field(min_length=20, max_length=2048)
     auth: str = Field(min_length=8, max_length=2048)
-
-
+ 
+ 
 class PushSubscriptionRequest(BaseModel):
     endpoint: str = Field(min_length=20, max_length=4096)
     keys: PushSubscriptionKeys
-    expirationTime: float | None = None
-
-
+    expirationTime: Optional[float] = None
+ 
+ 
 @router.get("/public-key")
 def get_public_key(
     current_user=Depends(get_current_user),
@@ -43,29 +44,41 @@ def get_public_key(
             status_code=503,
             detail="Web Push is not configured.",
         )
-
+ 
     return {
         "public_key": WEB_PUSH_VAPID_PUBLIC_KEY,
     }
-
-
+ 
+ 
 @router.post("/subscribe")
 def subscribe(
     payload: PushSubscriptionRequest,
+    request: Request,
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
     team=Depends(get_current_team),
 ):
+    # team_id comes ONLY from the server-side membership lookup,
+    # never from the client. web_push_subscriptions.team_id is NOT NULL,
+    # so users without an active team cannot subscribe.
+    team_id = team["team_id"] if team else None
+ 
+    if not team_id:
+        raise HTTPException(
+            status_code=403,
+            detail="No active team membership. Push notifications cannot be enabled.",
+        )
+ 
     endpoint = payload.endpoint.strip()
-
+ 
     if not endpoint.startswith("https://"):
         raise HTTPException(
             status_code=400,
             detail="Push endpoint must use HTTPS.",
         )
-
+ 
     expiration_time = None
-
+ 
     if payload.expirationTime is not None:
         try:
             expiration_time = dt.datetime.fromtimestamp(
@@ -77,7 +90,9 @@ def subscribe(
                 status_code=400,
                 detail="Invalid push subscription expiration time.",
             )
-
+ 
+    user_agent = (request.headers.get("user-agent") or "")[:512] or None
+ 
     db.execute(
         text(
             """
@@ -120,19 +135,19 @@ def subscribe(
         ),
         {
             "user_id": current_user["id"],
-            "team_id": team["team_id"] if team else None,
+            "team_id": team_id,
             "endpoint": endpoint,
             "p256dh": payload.keys.p256dh,
             "auth": payload.keys.auth,
             "expiration_time": expiration_time,
-            "user_agent": None,
+            "user_agent": user_agent,
         },
     )
-
+ 
     db.commit()
     return {"success": True}
-
-
+ 
+ 
 @router.delete("/subscribe")
 def unsubscribe(
     payload: PushSubscriptionRequest,
@@ -154,8 +169,10 @@ def unsubscribe(
             "user_id": current_user["id"],
         },
     )
-
+ 
     db.commit()
     return {"success": True}
-
+ 
+ 
 __all__ = ["router"]
+ 

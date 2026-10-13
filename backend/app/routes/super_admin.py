@@ -1,9 +1,7 @@
 from uuid import UUID
-
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
-
 from app.dependencies import (
     get_db,
     require_super_admin,
@@ -26,13 +24,10 @@ from app.schemas.super_admin import (
     ModuleUpdateRequest,
     OrganizationStatusRequest,
 )
-
 router = APIRouter(
     prefix="/super-admin",
     tags=["Super Admin"],
 )
-
-
 @router.get("/access-check")
 def access_check(
     current_user=Depends(require_super_admin),
@@ -44,15 +39,12 @@ def access_check(
         "email": current_user["email"],
         "platform_role": current_user["platform_role"],
     }
-
-
 @router.get("/dashboard")
 def dashboard(
     db: Session = Depends(get_db),
     current_user=Depends(require_super_admin),
 ):
     return get_dashboard_stats(db)
-
 
 @router.get("/organizations")
 def organizations(
@@ -67,7 +59,6 @@ def organizations(
         db=db,
         search=search,
     )
-
 
 @router.get("/organizations/{team_id}")
 def organization(

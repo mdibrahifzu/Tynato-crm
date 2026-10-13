@@ -437,7 +437,7 @@ export default function SalesSchedulingPage() {
             <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
               <div>
                 <h2 className="text-lg font-semibold">Central Bookings</h2>
-                <p className="mt-2 text-sm text-slate-400">Minimal internal view: time, assigned sales person, and customer team.</p>
+                <p className="mt-2 text-sm text-slate-400">View booked time, assigned sales person, customer team, and the CRM member who requested the call.</p>
               </div>
               <input type="date" value={date} onChange={(event) => setDate(event.target.value)} className="rounded-xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white" />
             </div>
@@ -451,6 +451,7 @@ export default function SalesSchedulingPage() {
                     <tr>
                       <th className="pb-3 pr-4">Time</th>
                       <th className="pb-3 pr-4">Sales Person</th>
+                      <th className="pb-3 pr-4">Requested By</th>
                       <th className="pb-3 pr-4">Customer Team</th>
                       <th className="pb-3">Action</th>
                     </tr>
@@ -458,10 +459,19 @@ export default function SalesSchedulingPage() {
                   <tbody>
                     {bookings.map((booking) => {
                       const canManage = booking.sales_user_id === currentUserId
+                      const requester = booking as SalesCallInternalBooking & {
+                        booked_by_user_id?: string | null
+                        booked_by_name?: string | null
+                        booked_by_email?: string | null
+                      }
                       return (
                         <tr key={booking.id} className="border-t border-white/10 align-top">
                           <td className="py-4 pr-4 whitespace-nowrap text-slate-200">{new Date(booking.start_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', timeZone: settings?.timezone || 'Asia/Kolkata' })} — {new Date(booking.end_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', timeZone: settings?.timezone || 'Asia/Kolkata' })}</td>
                           <td className="py-4 pr-4 text-slate-300">{booking.sales_user_name || 'Sales Scheduler'}</td>
+                          <td className="py-4 pr-4 text-slate-300">
+                            <div className="font-medium text-white">{requester.booked_by_name || 'Name not set'}</div>
+                            <div className="mt-1 text-xs text-slate-500">{requester.booked_by_email || 'Email unavailable'}</div>
+                          </td>
                           <td className="py-4 pr-4 font-medium text-white">{booking.customer_team_name}</td>
                           <td className="py-4">
                             {canManage ? (

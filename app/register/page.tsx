@@ -7,16 +7,23 @@ import { supabase } from '../lib/supabase'
 export default function RegisterPage() {
   const router = useRouter()
 
+  const [fullName, setFullName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
   const [loading, setLoading] = useState(false)
 
   async function register() {
+  const cleanFullName = fullName.trim()
   const cleanEmail = email.trim().toLowerCase()
 
-  if (!cleanEmail || !password || !confirmPassword) {
+  if (!cleanFullName || !cleanEmail || !password || !confirmPassword) {
     alert('Please fill in all fields')
+    return
+  }
+
+  if (cleanFullName.length > 120) {
+    alert('Full name must be 120 characters or fewer')
     return
   }
 
@@ -36,6 +43,9 @@ export default function RegisterPage() {
     const { data, error } = await supabase.auth.signUp({
       email: cleanEmail,
       password,
+      options: {
+        data: { full_name: cleanFullName },
+      },
     })
 
     if (error) {
@@ -94,16 +104,36 @@ export default function RegisterPage() {
 
         <div className="space-y-5">
           <div>
-            <label className="block mb-2">
+            <label htmlFor="register-full-name" className="block mb-2">
+              Full Name
+            </label>
+            <input
+              id="register-full-name"
+              type="text"
+              value={fullName}
+              placeholder="Enter your full name"
+              onChange={(e) => setFullName(e.target.value)}
+              autoComplete="name"
+              maxLength={120}
+              required
+              className="w-full p-4 rounded-lg border"
+              disabled={loading}
+            />
+          </div>
+
+          <div>
+            <label htmlFor="register-email" className="block mb-2">
               Email
             </label>
 
             <input
+              id="register-email"
               type="email"
               value={email}
               placeholder="name@company.com"
               onChange={(e) => setEmail(e.target.value)}
               className="w-full p-4 rounded-lg border"
+              required
               disabled={loading}
             />
           </div>
@@ -119,6 +149,8 @@ export default function RegisterPage() {
               placeholder="Create a password"
               onChange={(e) => setPassword(e.target.value)}
               className="w-full p-4 rounded-lg border"
+              autoComplete="new-password"
+              required
               disabled={loading}
             />
           </div>
@@ -134,6 +166,8 @@ export default function RegisterPage() {
               placeholder="Confirm your password"
               onChange={(e) => setConfirmPassword(e.target.value)}
               className="w-full p-4 rounded-lg border"
+              autoComplete="new-password"
+              required
               disabled={loading}
             />
           </div>

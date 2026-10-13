@@ -15,44 +15,12 @@ REMINDER_OFFSET_MINUTES = 15
 WORK_START_HOUR = 10
 WORK_END_HOUR = 18
  
-
-ACTION_DELAY_HOURS = {
-    "CALL": 24,
-    "FOLLOW_UP": 24,
-    "SCHEDULE_MEETING": 24,
-    "DEMO": 24,
-    "SEND_PROPOSAL": 4,
-    "REQUEST_INFORMATION": 48,
-    "HANDLE_OBJECTION": 48,
-    "NEGOTIATE": 48,
-    "NURTURE": 72,
-}
  
 CLOSED_STATUSES = {"converted", "not_interested", "junk"}
  
- 
-def compute_follow_up_at(
-    action: str,
-    now: Optional[datetime] = None,
-) -> Optional[datetime]:
-    hours = ACTION_DELAY_HOURS.get(action)
-    if hours is None:
-        return None
- 
-    now = now or datetime.now(timezone.utc)
-    due = (now + timedelta(hours=hours)).astimezone(IST)
- 
-    # Keep reminders inside working hours (IST).
-    if due.hour < WORK_START_HOUR:
-        due = due.replace(
-            hour=WORK_START_HOUR, minute=0, second=0, microsecond=0
-        )
-    elif due.hour >= WORK_END_HOUR:
-        due = (due + timedelta(days=1)).replace(
-            hour=WORK_START_HOUR, minute=0, second=0, microsecond=0
-        )
- 
-    return due.astimezone(timezone.utc)
+# A day with no clock time ("tomorrow") schedules at this local hour.
+DEFAULT_HOUR_IST = WORK_START_HOUR
+MIN_LEAD_MINUTES = REMINDER_OFFSET_MINUTES + 5
  
  
 _WEEKDAYS = {
@@ -142,7 +110,7 @@ def parse_follow_up_text(
     if offset is None and clock is None:
         return None
  
-    hour, minute = clock if clock else (WORK_START_HOUR, 0)
+    hour, minute = clock if clock else (DEFAULT_HOUR_IST, 0)
  
     due = (anchor_ist + timedelta(days=offset or 0)).replace(
         hour=hour, minute=minute, second=0, microsecond=0
@@ -161,9 +129,14 @@ def schedule_ai_follow_up(
     audio_id,
     analysis: Dict[str, Any],
 ) -> str:
-    """Create a follow-up reminder from the AI evaluation. Caller commits."""
+    """Create a lead_follow_ups reminder ONLY when the AI output states a
+    concrete day/time (audio_summaries.follow_up). No date is invented.
+    The caller commits. Returns a short outcome string for the log."""
     strategy = analysis.get("conversion_strategy") or {}
     action = str(strategy.get("recommended_action") or "").upper()
+ 
+    if action == "DISQUALIFY":
+        return "skipped: AI recommends disqualifying this lead"
  
     row = db.execute(
         text(
@@ -188,7 +161,9 @@ def schedule_ai_follow_up(
     if not row:
         return "skipped: audio is not linked to a lead"
  
-    # 1) A time spoken on the call (audio_summaries.follow_up) wins.
+    if str(row["status"] or "").lower() in CLOSED_STATUSES:
+        return "skipped: lead is closed"
+ 
     items = db.execute(
         text(
             "SELECT follow_up FROM public.audio_summaries "
@@ -202,28 +177,27 @@ def schedule_ai_follow_up(
             items = json.loads(items)
         except ValueError:
             items = [items]
+    if not isinstance(items, list):
+        items = []
  
     now = datetime.now(timezone.utc)
-    follow_up_at = None
-    source = "action"
+    call_at = row["call_at"] or now
  
-    if action != "DISQUALIFY":
-        for item in items if isinstance(items, list) else []:
-            parsed = parse_follow_up_text(item, row["call_at"] or now)
-            if parsed and parsed > now + timedelta(minutes=5):
-                follow_up_at = parsed
-                source = "call"
-                break
+    stated = [
+        parsed
+        for parsed in (parse_follow_up_text(i, call_at) for i in items)
+        if parsed is not None
+    ]
+    if not stated:
+        return "skipped: no concrete follow-up time in the AI output"
  
-    # 2) Otherwise the AI's recommended action decides the delay.
-    if follow_up_at is None:
-        follow_up_at = compute_follow_up_at(action)
+    usable = [
+        p for p in stated if p > now + timedelta(minutes=MIN_LEAD_MINUTES)
+    ]
+    if not usable:
+        return "skipped: stated follow-up time already passed or is too close"
  
-    if follow_up_at is None:
-        return "skipped: action {}".format(action or "none")
- 
-    if str(row["status"] or "").lower() in CLOSED_STATUSES:
-        return "skipped: lead is closed"
+    follow_up_at = usable[0]
  
     active = db.execute(
         text(
@@ -307,5 +281,5 @@ def schedule_ai_follow_up(
             {"lead_id": row["id"]},
         )
  
-    return "scheduled ({}) {} for {}".format(source, action, follow_up_at.isoformat())
+    return "scheduled for {}".format(follow_up_at.isoformat())
  

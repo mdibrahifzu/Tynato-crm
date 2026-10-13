@@ -1,56 +1,73 @@
 import { supabase } from './supabase'
-
+ 
 /* =========================================================
    API FETCH
    ========================================================= */
-
+ 
 export async function apiFetch(
   path: string,
   options: RequestInit = {},
 ) {
   const { data, error } =
     await supabase.auth.getSession()
-
+ 
   if (error) {
     console.error(
       'Failed to get session:',
       error,
     )
-
+ 
     const message = error.message.toLowerCase()
     const isInvalidRefreshToken =
       message.includes('invalid refresh token') ||
       message.includes('refresh token not found') ||
       message.includes('refresh token')
-
+ 
     if (isInvalidRefreshToken) {
       await supabase.auth.signOut({
         scope: 'local',
       })
-
+ 
       if (typeof window !== 'undefined') {
         window.location.replace('/login')
       }
     }
-
+ 
     throw error
   }
-
+ 
   const token =
     data.session?.access_token
-
+ 
   if (!token) {
     if (typeof window !== 'undefined') {
       window.location.replace('/login')
     }
-
+ 
     throw new Error('Not authenticated')
   }
-
-  const baseUrl =
+ 
+  /*
+   * NEXT_PUBLIC_* values are inlined at build time.
+   * Localhost fallback is allowed in development ONLY, so a
+   * missing production variable fails loudly instead of sending
+   * requests to the visitor's own machine.
+   */
+  const baseUrl = (
     process.env.NEXT_PUBLIC_API_URL ||
-    'http://127.0.0.1:8000'
-
+    (process.env.NODE_ENV === 'development'
+      ? 'http://127.0.0.1:8000'
+      : '')
+  )
+    .trim()
+    .replace(/\/+$/, '')
+ 
+  if (!baseUrl) {
+    throw new Error(
+      'NEXT_PUBLIC_API_URL is not configured',
+    )
+  }
+ 
   const res = await fetch(
     `${baseUrl}${path}`,
     {
@@ -61,37 +78,37 @@ export async function apiFetch(
       },
     },
   )
-
+ 
   if (res.status === 401) {
     await supabase.auth.signOut({
       scope: 'local',
     })
-
+ 
     if (typeof window !== 'undefined') {
       window.location.replace('/login')
     }
-
+ 
     throw new Error('Session expired')
   }
-
+ 
   return res
 }
-
-
+ 
+ 
 /* =========================================================
    COMMON RESPONSE PARSER
    ========================================================= */
-
+ 
 export async function parseApiResponse<T>(
   res: Response,
 ): Promise<T> {
   if (!res.ok) {
     let message =
       `Request failed (${res.status})`
-
+ 
     try {
       const body = await res.json()
-
+ 
       if (
         typeof body?.detail === 'string'
       ) {
@@ -109,18 +126,18 @@ export async function parseApiResponse<T>(
     } catch {
       // Keep default error message.
     }
-
+ 
     throw new Error(message)
   }
-
+ 
   return res.json() as Promise<T>
 }
-
-
+ 
+ 
 /* =========================================================
    SUPER ADMIN TYPES
    ========================================================= */
-
+ 
 export interface SuperAdminDashboard {
   organizations: {
     total: number
@@ -130,8 +147,8 @@ export interface SuperAdminDashboard {
   users: number
   super_admins: number
 }
-
-
+ 
+ 
 export interface Organization {
   id: string
   name: string
@@ -145,21 +162,21 @@ export interface Organization {
   searches_used: number | null
   created_at: string
 }
-
-
+ 
+ 
 /* =========================================================
    MODULE ACCESS
    ========================================================= */
-
+ 
 export interface ModuleAccess {
   module_key: string
   module_name: string
-
+ 
   /**
    * Global/default module availability.
    */
   global_enabled: boolean
-
+ 
   /**
    * Organization-specific override.
    *
@@ -168,50 +185,50 @@ export interface ModuleAccess {
    * false = explicitly disabled
    */
   organization_override: boolean | null
-
+ 
   /**
    * Final calculated access.
    */
   effective_enabled: boolean
-
+ 
   /**
    * Present when the user belongs to an organization.
    */
   team_id?: string | null
 }
-
-
+ 
+ 
 export async function getMyModuleAccess(): Promise<ModuleAccess[]> {
   const res = await apiFetch(
     '/modules/access',
   )
-
+ 
   return parseApiResponse<ModuleAccess[]>(
     res,
   )
 }
-
-
+ 
+ 
 /* =========================================================
    MODULE SETTINGS
    ========================================================= */
-
+ 
 export interface ModuleSetting {
   id?: string
-
+ 
   module_key: string
   module_name: string
-
+ 
   /**
    * Used by the global module settings API.
    */
   is_enabled?: boolean
-
+ 
   /**
    * Global availability.
    */
   global_enabled?: boolean
-
+ 
   /**
    * Organization override.
    *
@@ -220,17 +237,17 @@ export interface ModuleSetting {
    * false = disable
    */
   access_override?: boolean | null
-
+ 
   /**
    * Final access for the organization.
    */
   effective_enabled?: boolean
-
+ 
   created_at?: string
   updated_at?: string
 }
-
-
+ 
+ 
 export interface OrganizationModuleSetting {
   module_key: string
   module_name: string
@@ -238,24 +255,24 @@ export interface OrganizationModuleSetting {
   organization_override: boolean | null
   effective_enabled: boolean
 }
-
-
+ 
+ 
 /* =========================================================
    ORGANIZATION MODULE RESPONSE
    ========================================================= */
-
+ 
 export interface OrganizationModulesResponse {
   team_id: string
   team_name: string
   team_status: 'active' | 'suspended'
   modules: OrganizationModuleSetting[]
 }
-
-
+ 
+ 
 /* =========================================================
    PLATFORM USERS
    ========================================================= */
-
+ 
 export interface PlatformUser {
   id: string
   email: string | null
@@ -266,12 +283,12 @@ export interface PlatformUser {
   subscription_tier: string
   created_at: string
 }
-
-
+ 
+ 
 /* =========================================================
    AUDIT LOGS
    ========================================================= */
-
+ 
 export interface AuditLog {
   id: string
   actor_user_id: string
@@ -284,17 +301,17 @@ export interface AuditLog {
   metadata: Record<string, unknown> | null
   created_at: string
 }
-
-
+ 
+ 
 /* =========================================================
    SUPER ADMIN ACCESS
    ========================================================= */
-
+ 
 export async function superAdminAccessCheck() {
   const res = await apiFetch(
     '/super-admin/access-check',
   )
-
+ 
   return parseApiResponse<{
     success: boolean
     message: string
@@ -303,27 +320,27 @@ export async function superAdminAccessCheck() {
     platform_role: 'user' | 'super_admin'
   }>(res)
 }
-
-
+ 
+ 
 /* =========================================================
    SUPER ADMIN DASHBOARD
    ========================================================= */
-
+ 
 export async function getSuperAdminDashboard() {
   const res = await apiFetch(
     '/super-admin/dashboard',
   )
-
+ 
   return parseApiResponse<SuperAdminDashboard>(
     res,
   )
 }
-
-
+ 
+ 
 /* =========================================================
    ORGANIZATIONS
    ========================================================= */
-
+ 
 export async function getOrganizations(
   search = '',
 ) {
@@ -332,17 +349,17 @@ export async function getOrganizations(
         search.trim(),
       )}`
     : ''
-
+ 
   const res = await apiFetch(
     `/super-admin/organizations${query}`,
   )
-
+ 
   return parseApiResponse<Organization[]>(
     res,
   )
 }
-
-
+ 
+ 
 export async function getOrganization(
   teamId: string,
 ): Promise<Organization> {
@@ -351,13 +368,13 @@ export async function getOrganization(
       teamId,
     )}`,
   )
-
+ 
   return parseApiResponse<Organization>(
     res,
   )
 }
-
-
+ 
+ 
 export async function updateOrganizationStatus(
   teamId: string,
   status: 'active' | 'suspended',
@@ -376,28 +393,28 @@ export async function updateOrganizationStatus(
       }),
     },
   )
-
+ 
   return parseApiResponse<Organization>(
     res,
   )
 }
-
-
+ 
+ 
 /* =========================================================
    GLOBAL MODULES
    ========================================================= */
-
+ 
 export async function getGlobalModules() {
   const res = await apiFetch(
     '/super-admin/modules',
   )
-
+ 
   return parseApiResponse<ModuleSetting[]>(
     res,
   )
 }
-
-
+ 
+ 
 export async function updateGlobalModule(
   moduleKey: string,
   isEnabled: boolean,
@@ -416,17 +433,17 @@ export async function updateGlobalModule(
       }),
     },
   )
-
+ 
   return parseApiResponse<ModuleSetting>(
     res,
   )
 }
-
-
+ 
+ 
 /* =========================================================
    ORGANIZATION MODULES
    ========================================================= */
-
+ 
 /**
  * Get all module permissions for one organization.
  *
@@ -446,13 +463,13 @@ export async function getOrganizationModules(
       teamId,
     )}/modules`,
   )
-
+ 
   return parseApiResponse<OrganizationModulesResponse>(
     res,
   )
 }
-
-
+ 
+ 
 /**
  * Update organization-specific module access.
  *
@@ -481,7 +498,7 @@ export async function updateOrganizationModule(
       }),
     },
   )
-
+ 
   return parseApiResponse<{
     success: boolean
     team_id: string
@@ -492,12 +509,12 @@ export async function updateOrganizationModule(
     effective_enabled: boolean
   }>(res)
 }
-
-
+ 
+ 
 /* =========================================================
    PLATFORM USERS
    ========================================================= */
-
+ 
 export async function getPlatformUsers(
   search = '',
 ) {
@@ -506,21 +523,21 @@ export async function getPlatformUsers(
         search.trim(),
       )}`
     : ''
-
+ 
   const res = await apiFetch(
     `/super-admin/users${query}`,
   )
-
+ 
   return parseApiResponse<PlatformUser[]>(
     res,
   )
 }
-
-
+ 
+ 
 /* =========================================================
    AUDIT LOGS
    ========================================================= */
-
+ 
 export async function getAuditLogs(
   limit = 100,
   offset = 0,
@@ -529,29 +546,29 @@ export async function getAuditLogs(
     limit: String(limit),
     offset: String(offset),
   })
-
+ 
   const res = await apiFetch(
     `/super-admin/audit-logs?${params.toString()}`,
   )
-
+ 
   return parseApiResponse<AuditLog[]>(res)
 }
 /* =========================================================
    SALES CALL SCHEDULING
    ========================================================= */
-
+ 
 export interface SalesCallSlot {
   start_at: string
   end_at: string
   display_time: string
 }
-
+ 
 export interface SalesCallAvailability {
   date: string
   timezone: string
   slots: SalesCallSlot[]
 }
-
+ 
 export interface SalesCallBooking {
   id: string
   start_at: string
@@ -559,7 +576,7 @@ export interface SalesCallBooking {
   status: 'booked' | 'cancelled' | 'completed'
   created_at?: string
 }
-
+ 
 export interface SalesCallSettings {
   user_id: string
   full_name: string | null
@@ -567,7 +584,7 @@ export interface SalesCallSettings {
   default_slot_duration_minutes: number
   timezone: string
 }
-
+ 
 export interface SalesAvailabilityInterval {
   id?: string
   day_of_week: number
@@ -576,7 +593,7 @@ export interface SalesAvailabilityInterval {
   slot_duration_minutes: number | null
   is_active?: boolean
 }
-
+ 
 export interface SalesCallInternalBooking extends SalesCallBooking {
   sales_user_id: string
   sales_user_name: string | null
@@ -586,7 +603,7 @@ export interface SalesCallInternalBooking extends SalesCallBooking {
   booked_by_user_id: string
   updated_at?: string
 }
-
+ 
 export async function getSalesCallAvailability(
   date: string,
 ): Promise<SalesCallAvailability> {
@@ -595,7 +612,7 @@ export async function getSalesCallAvailability(
   )
   return parseApiResponse<SalesCallAvailability>(res)
 }
-
+ 
 export async function bookSalesCall(
   startAt: string,
 ): Promise<SalesCallBooking> {
@@ -610,7 +627,7 @@ export async function bookSalesCall(
   })
   return parseApiResponse<SalesCallBooking>(res)
 }
-
+ 
 export async function getMySalesCallBookings(
   date: string,
 ): Promise<{ date: string; bookings: SalesCallBooking[] }> {
@@ -619,7 +636,7 @@ export async function getMySalesCallBookings(
   )
   return parseApiResponse<{ date: string; bookings: SalesCallBooking[] }>(res)
 }
-
+ 
 export async function isSalesScheduler(): Promise<boolean> {
   try {
     const res = await apiFetch('/sales-scheduling/me')
@@ -628,7 +645,7 @@ export async function isSalesScheduler(): Promise<boolean> {
     return false
   }
 }
-
+ 
 export async function rescheduleSalesCall(
   bookingId: string,
   startLocal: string,
@@ -643,6 +660,7 @@ export async function rescheduleSalesCall(
       body: JSON.stringify({ start_local: startLocal }),
     },
   )
-
+ 
   return parseApiResponse<SalesCallBooking>(res)
 }
+ 

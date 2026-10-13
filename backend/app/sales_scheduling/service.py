@@ -636,6 +636,9 @@ def get_internal_bookings(db: Session, target_date: date, viewer_user_id: str):
                 sp.full_name AS sales_user_name,
                 b.customer_team_id,
                 t.name AS customer_team_name,
+                b.booked_by_user_id,
+                NULLIF(BTRIM(bp.full_name), '') AS booked_by_name,
+                bp.email AS booked_by_email,
                 b.start_at,
                 b.end_at,
                 b.status
@@ -644,6 +647,8 @@ def get_internal_bookings(db: Session, target_date: date, viewer_user_id: str):
                 ON sp.id = b.sales_user_id
             INNER JOIN public.teams t
                 ON t.id = b.customer_team_id
+            LEFT JOIN public.profiles bp
+                ON bp.id = b.booked_by_user_id
             WHERE b.status = 'booked'
               AND b.start_at < :day_end
               AND b.end_at > :day_start

@@ -149,6 +149,7 @@ def run_evaluation_job(audio_id: UUID):
         db.commit()
  
     except Exception:
+        logger.exception("Audio evaluation failed for audio_id=%s", audio_id)
         db.rollback()
         latest = _repo.get_evaluation(db, audio_id)
         attempts = int(latest["processing_attempts"]) if latest else AUDIO_MAX_PROCESSING_ATTEMPTS

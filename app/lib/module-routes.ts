@@ -38,14 +38,12 @@ export const MODULE_ROUTES: ModuleRoute[] = [
   },
 
   {
-    moduleKey: 'sales',
-    featureName: 'Sales',
-    matches: (pathname) =>
-      pathname === '/sales-call' ||
-      pathname.startsWith('/sales-call/') ||
-      pathname === '/sales-scheduling' ||
-      pathname.startsWith('/sales-scheduling/'),
-  },
+  moduleKey: 'sales',
+  featureName: 'Sales',
+  matches: (pathname) =>
+    pathname === '/sales-call' ||
+    pathname.startsWith('/sales-call/'),
+},
 
   {
     moduleKey: 'leads',

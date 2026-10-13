@@ -1,43 +1,42 @@
 import os
-
+ 
 import jwt
 from fastapi import Depends, HTTPException
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy import text
 from sqlalchemy.orm import Session
-
+ 
 from app.database import SessionLocal
-
-
+ 
+ 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
-
+ 
 if not SUPABASE_URL:
     raise RuntimeError("SUPABASE_URL is not configured")
-
-
+ 
+ 
 JWKS_URL = f"{SUPABASE_URL}/auth/v1/.well-known/jwks.json"
-
+ 
 security = HTTPBearer()
 _jwk_client = jwt.PyJWKClient(JWKS_URL)
-
-
+ 
+ 
 def get_db():
     db = SessionLocal()
     try:
         yield db
     finally:
         db.close()
-
-
+ 
+ 
 def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(security),
     db: Session = Depends(get_db),
 ):
-    token = credentials.credentials
-
+    token = credentials.credentials 
     try:
         signing_key = _jwk_client.get_signing_key_from_jwt(token)
-
+ 
         payload = jwt.decode(
             token,
             signing_key.key,
@@ -45,21 +44,21 @@ def get_current_user(
             audience="authenticated",
             leeway=60,
         )
-
+ 
     except Exception:
         raise HTTPException(
             status_code=401,
             detail="Invalid or expired token",
         )
-
+ 
     user_id = payload.get("sub")
-
+ 
     if not user_id:
         raise HTTPException(
             status_code=401,
             detail="Invalid token: missing user ID",
         )
-
+ 
     profile = db.execute(
         text(
             """
@@ -77,28 +76,28 @@ def get_current_user(
         ),
         {"id": user_id},
     ).mappings().first()
-
+ 
     if not profile:
         raise HTTPException(
             status_code=401,
             detail="No matching profile",
         )
-
+ 
     if not profile["is_active"]:
         raise HTTPException(
             status_code=403,
             detail="Account inactive",
         )
-
+ 
     return profile
-
-
+ 
+ 
 def require_sales_scheduler(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
     """Dedicated internal scheduling permission.
-
+ 
     Access is granted only when the authenticated profile has an
     active row in the private sales_scheduler_users table. No customer
     team role (user/admin) is treated as scheduler access.
@@ -118,16 +117,16 @@ def require_sales_scheduler(
         ),
         {"user_id": current_user["id"]},
     ).first()
-
+ 
     if not scheduler:
         raise HTTPException(
             status_code=403,
             detail="Sales Scheduler access required.",
         )
-
+ 
     return current_user
-
-
+ 
+ 
 def require_super_admin(
     current_user=Depends(get_current_user),
 ):
@@ -136,10 +135,10 @@ def require_super_admin(
             status_code=403,
             detail="Super Admin access required",
         )
-
+ 
     return current_user
-
-
+ 
+ 
 def get_current_team(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
@@ -170,10 +169,10 @@ def get_current_team(
             "user_id": current_user["id"],
         },
     ).mappings().first()
-
+ 
     return team
-
-
+ 
+ 
 def require_admin(
     current_user=Depends(get_current_user),
 ):
@@ -182,10 +181,10 @@ def require_admin(
             status_code=403,
             detail="Admin access required",
         )
-
+ 
     return current_user
-
-
+ 
+ 
 def require_team(
     team=Depends(get_current_team),
 ):
@@ -194,10 +193,10 @@ def require_team(
             status_code=404,
             detail="You do not belong to a team.",
         )
-
+ 
     return team
-
-
+ 
+ 
 def require_team_leader(
     team=Depends(require_team),
 ):
@@ -206,10 +205,10 @@ def require_team_leader(
             status_code=403,
             detail="Only the team leader can perform this action.",
         )
-
+ 
     return team
-
-
+ 
+ 
 def get_pending_team_membership(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
@@ -228,30 +227,20 @@ def get_pending_team_membership(
             "user_id": current_user["id"],
         },
     ).mappings().first()
-
+ 
     return membership
-
-
+ 
+ 
 def require_module(module_key: str):
     """
     Backend module authorization.
-
+ 
     Priority:
     1. Suspended organization -> deny
     2. Explicit access_override -> use it
     3. Otherwise preserve the existing module behavior
     """
-
-def require_module(module_key: str):
-    """
-    Backend module authorization.
-
-    Priority:
-    1. Suspended organization -> deny
-    2. Explicit access_override -> use it
-    3. Otherwise preserve the existing module behavior
-    """
-
+ 
     def dependency(
         db: Session = Depends(get_db),
         current_user=Depends(get_current_user),
@@ -263,20 +252,20 @@ def require_module(module_key: str):
                     m.module_key,
                     m.module_name,
                     m.is_enabled AS global_enabled,
-
+ 
                     t.id AS team_id,
                     t.status AS team_status,
-
+ 
                     ctm.is_enabled AS legacy_org_enabled,
                     ctm.access_override AS organization_override,
-
+ 
                     CASE
                         WHEN t.id IS NULL THEN
                             m.is_enabled
-
+ 
                         WHEN t.status <> 'active' THEN
                             FALSE
-
+ 
                         ELSE
                             COALESCE(
                                 ctm.access_override,
@@ -286,9 +275,9 @@ def require_module(module_key: str):
                                 )
                             )
                     END AS effective_enabled
-
+ 
                 FROM public.crm_module_settings m
-
+ 
                 LEFT JOIN LATERAL (
                     SELECT
                         t.id,
@@ -303,13 +292,13 @@ def require_module(module_key: str):
                     LIMIT 1
                 ) t
                     ON TRUE
-
+ 
                 LEFT JOIN public.crm_team_module_settings ctm
                     ON ctm.team_id = t.id
                    AND ctm.module_key = m.module_key
-
+ 
                 WHERE m.module_key = :module_key
-
+ 
                 LIMIT 1
                 """
             ),
@@ -318,13 +307,13 @@ def require_module(module_key: str):
                 "module_key": module_key,
             },
         ).mappings().first()
-
+ 
         if not access:
             raise HTTPException(
                 status_code=404,
                 detail=f"Module '{module_key}' is not configured.",
             )
-
+ 
         if (
             access["team_id"] is not None
             and access["team_status"] != "active"
@@ -340,7 +329,7 @@ def require_module(module_key: str):
                     ),
                 },
             )
-
+ 
         if access["effective_enabled"] is not True:
             raise HTTPException(
                 status_code=403,
@@ -354,7 +343,7 @@ def require_module(module_key: str):
                     ),
                 },
             )
-
+ 
         return current_user
-
+ 
     return dependency

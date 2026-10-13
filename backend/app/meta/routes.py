@@ -1,6 +1,6 @@
 from typing import Any, Dict, Optional
 from uuid import UUID
-
+ 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -29,19 +29,20 @@ from app.meta.service import (
     enqueue_meta_forms_sync,
     enqueue_meta_insights_sync,
     get_job_for_team,
+    get_page_token,
     get_user_token,
     lock_oauth_state,
     mark_oauth_state_used,
     upsert_discovered_assets,
 )
-
+ 
 router = APIRouter(prefix="/meta", tags=["Meta Integration"])
-
-
+ 
+ 
 if META_ENABLED:
     validate_runtime_config()
-
-
+ 
+ 
 @router.post("/oauth/start", response_model=OAuthStartResponse)
 def oauth_start(
     db: Session = Depends(get_db),
@@ -52,13 +53,13 @@ def oauth_start(
         _require_actor(team, current_user)
     except PermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc))
-
+ 
     if not META_APP_ID:
         raise HTTPException(status_code=503, detail="Meta OAuth is not configured")
-
+ 
     state = create_oauth_state(db, current_user["id"], team)
     return {"auth_url": build_authorization_url(state)}
-
+ 
 @router.post("/sync-now")
 def sync_now(
     background_tasks: BackgroundTasks,
@@ -69,12 +70,38 @@ def sync_now(
         _require_actor(team, current_user)
     except PermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc))
-
+ 
     from app.meta.lead_backfill import sync_team_now
-
+ 
     background_tasks.add_task(sync_team_now, team["team_id"])
     return {"success": True}
     
+@router.post("/connections/{connection_id}/pages/{page_id}/subscribe")
+def subscribe_page_leads(
+    connection_id: UUID,
+    page_id: str,
+    db: Session = Depends(get_db),
+    current_user: Dict = Depends(get_current_user),
+    team: Dict = Depends(require_team),
+):
+    try:
+        _require_actor(team, current_user)
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc))
+ 
+    connection = connection_for_team(db, connection_id, team["team_id"])
+    if not connection or connection.get("status") != "active":
+        raise HTTPException(status_code=404, detail="Active Meta connection not found")
+ 
+    try:
+        token = get_page_token(db, connection_id, team["team_id"], page_id)
+        MetaClient().subscribe_page(token, page_id)
+    except (MetaAPIError, ValueError) as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+ 
+    return {"success": True}
+ 
+ 
 @router.post("/oauth/complete")
 def oauth_complete(
     payload: OAuthCompleteRequest,
@@ -94,7 +121,7 @@ def oauth_complete(
         raise HTTPException(status_code=403, detail=str(exc))
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
-
+ 
     try:
         token_data = MetaClient().exchange_code(payload.code)
         connection = create_connection(db, current_user, team, token_data)
@@ -112,14 +139,14 @@ def oauth_complete(
     except Exception:
         db.rollback()
         raise HTTPException(status_code=500, detail="Meta authorization transaction failed")
-
+ 
     return {
         "success": True,
         "connection_id": connection["id"],
         "status": connection["status"],
     }
-
-
+ 
+ 
 @router.get("/connections", response_model=list[MetaConnectionOut])
 def list_connections(
     db: Session = Depends(get_db),
@@ -139,8 +166,8 @@ def list_connections(
         {"team_id": team["team_id"]},
     ).mappings().all()
     return [dict(row) for row in rows]
-
-
+ 
+ 
 @router.get("/connections/{connection_id}", response_model=MetaConnectionOut)
 def get_connection(
     connection_id: UUID,
@@ -151,8 +178,8 @@ def get_connection(
     if not row:
         raise HTTPException(status_code=404, detail="Meta connection not found")
     return row
-
-
+ 
+ 
 @router.post("/connections/{connection_id}/discover")
 def discover_assets(
     connection_id: UUID,
@@ -191,10 +218,10 @@ def discover_assets(
     except Exception:
         db.rollback()
         raise HTTPException(status_code=500, detail="Meta asset discovery failed")
-
+ 
     return {"success": True, "summary": summary}
-
-
+ 
+ 
 @router.get("/ad-accounts", response_model=list[MetaAdAccountOut])
 def list_ad_accounts(
     db: Session = Depends(get_db),
@@ -214,8 +241,8 @@ def list_ad_accounts(
         {"team_id": team["team_id"]},
     ).mappings().all()
     return [dict(row) for row in rows]
-
-
+ 
+ 
 @router.get("/campaigns", response_model=list[MetaCampaignOut])
 def list_campaigns(
     connection_id: Optional[UUID] = None,
@@ -226,14 +253,14 @@ def list_campaigns(
     params: Dict = {"team_id": team["team_id"]}
     connection_predicate = ""
     account_predicate = ""
-
+ 
     if connection_id is not None:
         connection_predicate = "AND c.connection_id = :connection_id"
         params["connection_id"] = connection_id
     if ad_account_row_id is not None:
         account_predicate = "AND c.ad_account_row_id = :ad_account_row_id"
         params["ad_account_row_id"] = ad_account_row_id
-
+ 
     rows = db.execute(
         text(
             """
@@ -267,8 +294,8 @@ def list_campaigns(
         params,
     ).mappings().all()
     return [dict(row) for row in rows]
-
-
+ 
+ 
 @router.get("/adsets")
 def list_adsets(
     connection_id: Optional[UUID] = None,
@@ -279,7 +306,7 @@ def list_adsets(
 ):
     params: Dict = {"team_id": team["team_id"]}
     predicates = []
-
+ 
     if connection_id is not None:
         predicates.append("s.connection_id = :connection_id")
         params["connection_id"] = connection_id
@@ -289,11 +316,11 @@ def list_adsets(
     if campaign_id is not None:
         predicates.append("s.meta_campaign_id = :campaign_id")
         params["campaign_id"] = campaign_id
-
+ 
     where_extra = ""
     if predicates:
         where_extra = "AND " + " AND ".join(predicates)
-
+ 
     rows = db.execute(
         text(
             """
@@ -329,8 +356,8 @@ def list_adsets(
         params,
     ).mappings().all()
     return [dict(row) for row in rows]
-
-
+ 
+ 
 @router.get("/ads")
 def list_ads(
     connection_id: Optional[UUID] = None,
@@ -342,7 +369,7 @@ def list_ads(
 ):
     params: Dict = {"team_id": team["team_id"]}
     predicates = []
-
+ 
     if connection_id is not None:
         predicates.append("a.connection_id = :connection_id")
         params["connection_id"] = connection_id
@@ -355,11 +382,11 @@ def list_ads(
     if campaign_id is not None:
         predicates.append("a.meta_campaign_id = :campaign_id")
         params["campaign_id"] = campaign_id
-
+ 
     where_extra = ""
     if predicates:
         where_extra = "AND " + " AND ".join(predicates)
-
+ 
     rows = db.execute(
         text(
             """
@@ -398,8 +425,8 @@ def list_ads(
         params,
     ).mappings().all()
     return [dict(row) for row in rows]
-
-
+ 
+ 
 @router.post(
     "/connections/{connection_id}/campaigns/sync",
     response_model=MetaCampaignSyncResponse,
@@ -415,11 +442,11 @@ def queue_campaign_sync(
         _require_actor(team, current_user)
     except PermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc))
-
+ 
     connection = connection_for_team(db, connection_id, team["team_id"])
     if not connection:
         raise HTTPException(status_code=404, detail="Meta connection not found")
-
+ 
     try:
         if payload.ad_account_row_id is not None:
             account_exists = db.execute(
@@ -441,7 +468,7 @@ def queue_campaign_sync(
             ).scalar()
             if not account_exists:
                 raise HTTPException(status_code=404, detail="Meta ad account not found")
-
+ 
         job_id = enqueue_campaign_sync(
             db,
             connection_id,
@@ -454,16 +481,16 @@ def queue_campaign_sync(
     except Exception:
         db.rollback()
         raise HTTPException(status_code=500, detail="Unable to queue campaign sync")
-
+ 
     job = get_job_for_team(db, job_id, team["team_id"])
     return {
         "success": True,
         "job_id": job_id,
         "status": job["status"] if job else "pending",
     }
-
-
-
+ 
+ 
+ 
 @router.get("/pages")
 def list_pages(
     db: Session = Depends(get_db),
@@ -491,8 +518,8 @@ def list_pages(
         {"team_id": team["team_id"]},
     ).mappings().all()
     return [dict(row) for row in rows]
-
-
+ 
+ 
 @router.get("/pages/{page_id}/forms")
 def list_page_forms(
     page_id: str,
@@ -527,8 +554,8 @@ def list_page_forms(
         },
     ).mappings().all()
     return [dict(row) for row in rows]
-
-
+ 
+ 
 @router.post("/connections/{connection_id}/pages/{page_id}/forms/sync")
 def queue_form_sync(
     connection_id: UUID,
@@ -541,17 +568,17 @@ def queue_form_sync(
         _require_actor(team, current_user)
     except PermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc))
-
+ 
     connection = connection_for_team(
         db, connection_id, team["team_id"]
     )
-
+ 
     if not connection or connection.get("status") != "active":
         raise HTTPException(
             status_code=404,
             detail="Active Meta connection not found",
         )
-
+ 
     page = db.execute(
         text(
             """
@@ -570,31 +597,31 @@ def queue_form_sync(
             "page_id": page_id,
         },
     ).first()
-
+ 
     if not page:
         raise HTTPException(
             status_code=404,
             detail="Meta Page not found",
         )
-
+ 
     job_id = enqueue_meta_forms_sync(
         db,
         connection_id,
         team["team_id"],
         page_id,
     )
-
+ 
     job = get_job_for_team(
         db, job_id, team["team_id"]
     )
-
+ 
     return {
         "success": True,
         "job_id": job_id,
         "status": job["status"] if job else "pending",
     }
-
-
+ 
+ 
 @router.post("/connections/{connection_id}/insights/sync")
 def queue_insights_sync(
     connection_id: UUID,
@@ -609,17 +636,17 @@ def queue_insights_sync(
         _require_actor(team, current_user)
     except PermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc))
-
+ 
     connection = connection_for_team(
         db, connection_id, team["team_id"]
     )
-
+ 
     if not connection or connection.get("status") != "active":
         raise HTTPException(
             status_code=404,
             detail="Active Meta connection not found",
         )
-
+ 
     if ad_account_row_id is not None:
         account_exists = db.execute(
             text(
@@ -639,13 +666,13 @@ def queue_insights_sync(
                 "connection_id": connection_id,
             },
         ).scalar()
-
+ 
         if not account_exists:
             raise HTTPException(
                 status_code=404,
                 detail="Meta ad account not found",
             )
-
+ 
     job_id = enqueue_meta_insights_sync(
         db,
         connection_id,
@@ -654,22 +681,25 @@ def queue_insights_sync(
         since,
         until,
     )
-
+ 
     job = get_job_for_team(
         db, job_id, team["team_id"]
     )
-
+ 
     return {
         "success": True,
         "job_id": job_id,
         "status": job["status"] if job else "pending",
     }
-
-
+ 
+ 
 @router.get("/insights")
 def list_insights(
     ad_account_row_id: Optional[UUID] = None,
     level: Optional[str] = None,
+    campaign_id: Optional[str] = None,
+    adset_id: Optional[str] = None,
+    ad_id: Optional[str] = None,
     since: Optional[str] = None,
     until: Optional[str] = None,
     db: Session = Depends(get_db),
@@ -685,30 +715,38 @@ def list_insights(
             status_code=400,
             detail="Invalid insights level",
         )
-
+ 
     params: Dict[str, Any] = {
         "team_id": team["team_id"]
     }
     filters = ["team_id = :team_id"]
-
+ 
     if ad_account_row_id:
         filters.append(
             "ad_account_row_id = :ad_account_row_id"
         )
         params["ad_account_row_id"] = ad_account_row_id
-
+ 
     if level:
         filters.append("level = :level")
         params["level"] = level
-
+    for column, value in (
+        ("campaign_id", campaign_id),
+        ("adset_id", adset_id),
+        ("ad_id", ad_id),
+    ):
+        if value:
+            filters.append("{0} = :{0}".format(column))
+            params[column] = value
+ 
     if since:
         filters.append("date_start >= :since")
         params["since"] = since
-
+ 
     if until:
         filters.append("date_stop <= :until")
         params["until"] = until
-
+ 
     rows = db.execute(
         text(
             """
@@ -743,41 +781,63 @@ def list_insights(
         ),
         params,
     ).mappings().all()
-
+ 
     return [dict(row) for row in rows]
-
-
+ 
+ 
 @router.get("/leads")
 def list_meta_leads(
     page_id: Optional[str] = None,
     form_id: Optional[str] = None,
     campaign_id: Optional[str] = None,
+    adset_id: Optional[str] = None,
+    ad_id: Optional[str] = None,
+    since: Optional[str] = None,
+    until: Optional[str] = None,
     db: Session = Depends(get_db),
     team: Dict = Depends(require_team),
 ):
     params: Dict[str, Any] = {
         "team_id": team["team_id"]
     }
-
+ 
     filters = [
         "a.team_id = :team_id",
         "a.source = 'meta'",
     ]
-
+ 
     if page_id:
         filters.append("a.meta_page_id = :page_id")
         params["page_id"] = page_id
-
+ 
     if form_id:
         filters.append("a.meta_form_id = :form_id")
         params["form_id"] = form_id
-
+ 
     if campaign_id:
         filters.append(
             "a.meta_campaign_id = :campaign_id"
         )
         params["campaign_id"] = campaign_id
-
+ 
+    for column, value in (
+        ("a.meta_adset_id", adset_id),
+        ("a.meta_ad_id", ad_id),
+    ):
+        if value:
+            key = column.split(".")[1]
+            filters.append("{} = :{}".format(column, key))
+            params[key] = value
+ 
+    if since:
+        filters.append("a.meta_created_at >= CAST(:since AS date)")
+        params["since"] = since
+    if until:
+        filters.append(
+            "a.meta_created_at < CAST(:until AS date) + INTERVAL '1 day'"
+        )
+        params["until"] = until
+ 
     rows = db.execute(
         text(
             """
@@ -812,10 +872,10 @@ def list_meta_leads(
         ),
         params,
     ).mappings().all()
-
+ 
     return [dict(row) for row in rows]
-
-
+ 
+ 
 @router.get("/jobs/{job_id}", response_model=MetaJobOut)
 def get_meta_job(
     job_id: UUID,
@@ -826,8 +886,8 @@ def get_meta_job(
     if not row:
         raise HTTPException(status_code=404, detail="Meta job not found")
     return row
-
-
+ 
+ 
 @router.delete("/connections/{connection_id}")
 def disconnect_connection(
     connection_id: UUID,
@@ -839,7 +899,7 @@ def disconnect_connection(
         _require_actor(team, current_user)
     except PermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc))
-
+ 
     try:
         result = db.execute(
             text(
@@ -854,7 +914,7 @@ def disconnect_connection(
         ).first()
         if not result:
             raise HTTPException(status_code=404, detail="Meta connection not found")
-
+ 
         db.execute(
             text("DELETE FROM meta_credentials WHERE connection_id = :connection_id"),
             {"connection_id": connection_id},
@@ -900,10 +960,10 @@ def disconnect_connection(
     except Exception:
         db.rollback()
         raise HTTPException(status_code=500, detail="Unable to disconnect Meta")
-
+ 
     return {"success": True}
-
-
+ 
+ 
 @router.get("/health", response_model=MetaHealthOut)
 def health(
     db: Session = Depends(get_db),
@@ -926,3 +986,4 @@ def health(
         "connections": int(row["connections"]),
         "active_connections": int(row["active_connections"]),
     }
+ 

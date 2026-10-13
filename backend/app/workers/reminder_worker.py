@@ -1,5 +1,5 @@
 from __future__ import annotations
-
+ 
 import json
 import logging
 import os
@@ -7,30 +7,30 @@ import time
 from pathlib import Path
 from datetime import datetime, timezone
 from dotenv import load_dotenv
-
+ 
 # Load backend/.env before importing anything that reads env vars.
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 load_dotenv(BASE_DIR / ".env", override=False)
-
+ 
 from sqlalchemy import text
-
+ 
 from app.database import engine
 from app.routes.notifications import create_in_app_notification
-
+ 
 try:
     from pywebpush import webpush, WebPushException
 except ImportError:  # in-app reminders still work without push
     webpush = None
     WebPushException = Exception
-
+ 
 log = logging.getLogger("reminder_worker")
-
+ 
 POLL_SECONDS = 20
 VAPID_PRIVATE_KEY = os.getenv("WEB_PUSH_VAPID_PRIVATE_KEY", "").strip()
 VAPID_SUBJECT = os.getenv(
     "WEB_PUSH_VAPID_SUBJECT", "mailto:admin@tynato.com"
 ).strip()
-
+ 
 OFFSET_LABELS = {
     5: "5 minutes",
     15: "15 minutes",
@@ -38,8 +38,8 @@ OFFSET_LABELS = {
     60: "1 hour",
     1440: "24 hours",
 }
-
-
+ 
+ 
 def recover_stuck(conn):
     # Rows left in 'processing' by a crashed run go back to the queue.
     conn.execute(
@@ -52,8 +52,8 @@ def recover_stuck(conn):
             """
         )
     )
-
-
+ 
+ 
 def claim_due(conn):
     rows = conn.execute(
         text(
@@ -81,15 +81,15 @@ def claim_due(conn):
             """
         )
     ).mappings().all()
-
+ 
     return [dict(row) for row in rows]
-
-
+ 
+ 
 def send_push(user_id, payload):
     if webpush is None or not VAPID_PRIVATE_KEY:
         log.warning("Web push skipped: pywebpush or VAPID private key missing")
         return
-
+ 
     with engine.begin() as conn:
         subs = conn.execute(
             text(
@@ -102,7 +102,7 @@ def send_push(user_id, payload):
             ),
             {"user_id": str(user_id)},
         ).mappings().all()
-
+ 
     for sub in subs:
         try:
             webpush(
@@ -137,25 +137,25 @@ def send_push(user_id, payload):
                 log.error("Push failed (status=%s): %s", status, exc)
         except Exception:
             log.exception("Push failed")
-
-
+ 
+ 
 def process(row):
     left = int(
         (row["follow_up_at"] - datetime.now(timezone.utc)).total_seconds() // 60
     )
     left = max(left, 1)
     when = f"{left} minutes" if left < 90 else f"{round(left / 60)} hours"
-
+ 
     with engine.begin() as conn:
         lead = conn.execute(
             text("SELECT full_name FROM public.custom_leads WHERE id = :id"),
             {"id": str(row["custom_lead_id"])},
         ).mappings().first()
-
+ 
         name = (lead["full_name"] if lead else None) or "A lead"
         title = "Follow-up reminder"
         message = f"Follow-up with {name} is due in {when}."
-
+ 
         create_in_app_notification(
             conn,
             team_id=row["team_id"],
@@ -168,7 +168,7 @@ def process(row):
             metadata={"follow_up_at": row["follow_up_at"].isoformat()},
             dedupe_key=f"follow_up_reminder:{row['id']}:{row['remind_at'].isoformat()}",
         )
-
+ 
         conn.execute(
             text(
                 """
@@ -181,7 +181,7 @@ def process(row):
             ),
             {"id": row["id"]},
         )
-
+ 
     # Push is sent after the DB commit, so a push failure never undoes the reminder.
     send_push(
         row["assigned_to"],
@@ -193,11 +193,11 @@ def process(row):
             "target_url": "/custom-lead",
         },
     )
-
-
+ 
+ 
 def process_due():
     pushes = []
-
+ 
     with engine.begin() as conn:
         rows = conn.execute(
             text(
@@ -221,17 +221,17 @@ def process_due():
                 """
             )
         ).mappings().all()
-
+ 
         for row in rows:
             lead = conn.execute(
                 text("SELECT full_name FROM public.custom_leads WHERE id = :id"),
                 {"id": str(row["custom_lead_id"])},
             ).mappings().first()
-
+ 
             name = (lead["full_name"] if lead else None) or "A lead"
             title = "Follow-up due now"
             message = f"Follow-up with {name} is due now."
-
+ 
             create_in_app_notification(
                 conn,
                 team_id=row["team_id"],
@@ -244,9 +244,9 @@ def process_due():
                 metadata={"follow_up_at": row["follow_up_at"].isoformat()},
                 dedupe_key=f"follow_up_due:{row['id']}:{row['follow_up_at'].isoformat()}",
             )
-
+ 
             pushes.append((row, title, message))
-
+ 
     for row, title, message in pushes:
         send_push(
             row["assigned_to"],
@@ -259,20 +259,20 @@ def process_due():
             },
         )
         log.info("Due alert sent for follow-up %s", row["id"])
-
+ 
 def main():
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
     log.info("Reminder worker started")
-
+ 
     while True:
         try:
             with engine.begin() as conn:
                 recover_stuck(conn)
                 rows = claim_due(conn)
-
+ 
             for row in rows:
                 try:
                     process(row)
@@ -290,12 +290,15 @@ def main():
                             ),
                             {"id": row["id"]},
                         )
-                    process_due()
+            try:
+                process_due()
+            except Exception:
+                log.exception("Due-now alerts failed")
         except Exception:
             log.exception("Worker cycle failed")
-
+ 
         time.sleep(POLL_SECONDS)
-
-
+ 
+ 
 if __name__ == "__main__":
     main()

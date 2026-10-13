@@ -1,58 +1,58 @@
 from __future__ import annotations
-
+ 
 import logging
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 from uuid import UUID
-
+ 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy import text
 from sqlalchemy.orm import Session
-
+ 
 from app.dependencies import get_current_team, get_current_user, get_db
 from app.routes.notifications import create_in_app_notification
-
+ 
 logger = logging.getLogger(__name__)
-
+ 
 router = APIRouter()
-
+ 
 REMINDER_OFFSETS = {5, 15, 30, 60, 1440}
 ACTIVE_STATUSES = ("scheduled", "processing", "reminded")
-
-
+ 
+ 
 class FollowUpRequest(BaseModel):
     follow_up_at: datetime
     reminder_offset_minutes: int = Field(default=15)
     assigned_to: Optional[UUID] = None
-
+ 
     def validate_values(self) -> None:
         if self.reminder_offset_minutes not in REMINDER_OFFSETS:
             raise HTTPException(
                 status_code=400,
                 detail="Invalid reminder offset.",
             )
-
+ 
         if self.follow_up_at.tzinfo is None or self.follow_up_at.utcoffset() is None:
             raise HTTPException(
                 status_code=400,
                 detail="follow_up_at must include a timezone offset.",
             )
-
-
+ 
+ 
 def _lead_access_clause(current_user, team):
     if current_user["role"] == "admin":
         return "", {}
-
+ 
     if team:
         return "AND cl.team_id = :team_id", {"team_id": team["team_id"]}
-
+ 
     return (
         "AND cl.owner_id = :owner_id AND cl.team_id IS NULL",
         {"owner_id": current_user["id"]},
     )
-
-
+ 
+ 
 def _get_accessible_lead(
     db: Session,
     custom_lead_id: UUID,
@@ -60,7 +60,7 @@ def _get_accessible_lead(
     team,
 ):
     access_clause, access_params = _lead_access_clause(current_user, team)
-
+ 
     result = db.execute(
         text(
             f"""
@@ -83,16 +83,16 @@ def _get_accessible_lead(
             **access_params,
         },
     ).mappings().first()
-
+ 
     if not result:
         raise HTTPException(
             status_code=404,
             detail="Custom lead not found.",
         )
-
+ 
     return result
-
-
+ 
+ 
 def _validate_assignee(
     db: Session,
     *,
@@ -106,7 +106,7 @@ def _validate_assignee(
                 detail="A personal custom lead can only be assigned to its owner.",
             )
         return
-
+ 
     member = db.execute(
         text(
             """
@@ -126,14 +126,14 @@ def _validate_assignee(
             "assigned_to": assigned_to,
         },
     ).first()
-
+ 
     if not member:
         raise HTTPException(
             status_code=400,
             detail="Assigned user is not an active member of this team.",
         )
-
-
+ 
+ 
 @router.get("/follow-ups/assignees")
 def get_follow_up_assignees(
     db: Session = Depends(get_db),
@@ -153,9 +153,9 @@ def get_follow_up_assignees(
             ),
             {"user_id": current_user["id"]},
         ).mappings().first()
-
+ 
         return [dict(profile)] if profile else []
-
+ 
     rows = db.execute(
     text(
         """
@@ -181,10 +181,10 @@ def get_follow_up_assignees(
         "current_user_id": current_user["id"],
     },
 ).mappings().all()
-
+ 
     return [dict(row) for row in rows]
-
-
+ 
+ 
 @router.get("/custom-leads/{custom_lead_id}/follow-up")
 def get_follow_up(
     custom_lead_id: UUID,
@@ -198,7 +198,7 @@ def get_follow_up(
         current_user,
         team,
     )
-
+ 
     row = db.execute(
         text(
             """
@@ -223,10 +223,10 @@ def get_follow_up(
         ),
         {"custom_lead_id": str(lead["id"])},
     ).mappings().first()
-
+ 
     return dict(row) if row else None
-
-
+ 
+ 
 @router.post("/custom-leads/{custom_lead_id}/follow-up")
 def schedule_follow_up(
     custom_lead_id: UUID,
@@ -236,20 +236,20 @@ def schedule_follow_up(
     team=Depends(get_current_team),
 ):
     payload.validate_values()
-
+ 
     follow_up_at = payload.follow_up_at.astimezone(timezone.utc)
     now = datetime.now(timezone.utc)
-
+ 
     if follow_up_at <= now:
         raise HTTPException(
             status_code=400,
             detail="Follow-up date and time must be in the future.",
         )
-
+ 
     remind_at = follow_up_at - timedelta(
         minutes=payload.reminder_offset_minutes
     )
-
+ 
     try:
         lead = _get_accessible_lead(
             db,
@@ -257,14 +257,14 @@ def schedule_follow_up(
             current_user,
             team,
         )
-
+ 
         assigned_to = str(payload.assigned_to or current_user["id"])
         _validate_assignee(
             db,
             lead=lead,
             assigned_to=assigned_to,
         )
-
+ 
         existing = db.execute(
             text(
                 """
@@ -279,7 +279,7 @@ def schedule_follow_up(
             ),
             {"custom_lead_id": str(lead["id"])},
         ).scalar()
-
+ 
         if existing:
             follow_up = db.execute(
                 text(
@@ -293,6 +293,7 @@ def schedule_follow_up(
                         remind_at = :remind_at,
                         status = 'scheduled',
                         reminder_sent_at = NULL,
+                        due_notified_at = NULL,
                         updated_at = NOW()
                     WHERE id = :id
                     RETURNING
@@ -363,10 +364,10 @@ def schedule_follow_up(
                     "remind_at": remind_at,
                 },
             ).mappings().first()
-
+ 
         if not follow_up:
             raise RuntimeError("Follow-up creation failed.")
-
+ 
         db.execute(
             text(
                 """
@@ -379,7 +380,7 @@ def schedule_follow_up(
             ),
                         {"custom_lead_id": str(lead["id"])},
         )
-
+ 
         if assigned_to != str(current_user["id"]):
             try:
                 with db.begin_nested():
@@ -397,15 +398,15 @@ def schedule_follow_up(
                     )
             except Exception:
                 logger.exception("Assignment notification failed")
-
+ 
         db.commit()
-
+ 
         return {
             "success": True,
             "action": "rescheduled" if existing else "scheduled",
             "follow_up": dict(follow_up),
         }
-
+ 
     except HTTPException:
         db.rollback()
         raise
@@ -415,8 +416,8 @@ def schedule_follow_up(
             status_code=500,
             detail="Could not schedule the follow-up.",
         )
-
-
+ 
+ 
 @router.delete("/custom-leads/{custom_lead_id}/follow-up")
 def cancel_follow_up(
     custom_lead_id: UUID,
@@ -430,7 +431,7 @@ def cancel_follow_up(
         current_user,
         team,
     )
-
+ 
     result = db.execute(
         text(
             """
@@ -445,15 +446,15 @@ def cancel_follow_up(
         ),
         {"custom_lead_id": str(lead["id"])},
     )
-
+ 
     db.commit()
-
+ 
     return {
         "success": True,
         "cancelled": int(result.rowcount or 0),
     }
-
-
+ 
+ 
 @router.patch("/custom-leads/{custom_lead_id}/follow-up/complete")
 def complete_follow_up(
     custom_lead_id: UUID,
@@ -467,7 +468,7 @@ def complete_follow_up(
         current_user,
         team,
     )
-
+ 
     row = db.execute(
         text(
             """
@@ -482,16 +483,17 @@ def complete_follow_up(
         ),
         {"custom_lead_id": str(lead["id"])},
     ).mappings().first()
-
+ 
     if row is None:
         db.rollback()
         raise HTTPException(
             status_code=404,
             detail="No active follow-up found.",
         )
-
+ 
     db.commit()
     return {"success": True, "follow_up": dict(row)}
-
-
+ 
+ 
 __all__ = ["router"]
+ 
