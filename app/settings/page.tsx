@@ -29,9 +29,13 @@ const inputClass =
 export default function SettingsPage() {
   const [email, setEmail] = useState('')
   const [fullName, setFullName] = useState('')
+  const [savedFullName, setSavedFullName] = useState('')
+  const [editingProfileName, setEditingProfileName] = useState(false)
   const [savingProfile, setSavingProfile] = useState(false)
   const [profileError, setProfileError] = useState('')
   const [profileSuccess, setProfileSuccess] = useState('')
+
+  const hasProfileNameChanges = fullName.trim() !== savedFullName
 
   const [business, setBusiness] = useState<BusinessSettings | null>(null)
   const [businessName, setBusinessName] = useState('')
@@ -75,12 +79,17 @@ export default function SettingsPage() {
         const profileName = typeof profile?.full_name === 'string' ? profile.full_name.trim() : ''
         const metadataName = user.user_metadata?.full_name
         const fallbackName = typeof metadataName === 'string' ? metadataName.trim() : ''
-        if (mounted) setFullName(profileName || fallbackName)
+        const initialName = profileName || fallbackName
+        if (mounted) {
+          setFullName(initialName)
+          setSavedFullName(initialName)
+        }
       } catch (error) {
         const metadataName = user.user_metadata?.full_name
         const fallbackName = typeof metadataName === 'string' ? metadataName.trim() : ''
         if (mounted) {
           setFullName(fallbackName)
+          setSavedFullName(fallbackName)
           setProfileError(error instanceof Error ? error.message : 'Unable to load your CRM profile name.')
         }
       }
@@ -138,8 +147,10 @@ export default function SettingsPage() {
         throw new Error(data?.detail || 'Unable to save your profile name.')
       }
 
-      const savedName = typeof data?.full_name === 'string' ? data.full_name : cleanName
+      const savedName = typeof data?.full_name === 'string' ? data.full_name.trim() : cleanName
       setFullName(savedName)
+      setSavedFullName(savedName)
+      setEditingProfileName(false)
 
       // Auth metadata is a fallback only; the profiles row is canonical.
       const { error: metadataError } = await supabase.auth.updateUser({
@@ -472,17 +483,37 @@ export default function SettingsPage() {
                 <label htmlFor="profile-full-name" className="mb-2 block text-xs uppercase tracking-wide text-white/45">
                   Full Name
                 </label>
-                <input
-                  id="profile-full-name"
-                  type="text"
-                  value={fullName}
-                  onChange={(event) => setFullName(event.target.value)}
-                  maxLength={120}
-                  autoComplete="name"
-                  disabled={savingProfile}
-                  placeholder="Enter your full name"
-                  className={inputClass}
-                />
+                <div className="flex items-center gap-2">
+                  <input
+                    id="profile-full-name"
+                    type="text"
+                    value={fullName}
+                    onChange={(event) => {
+                      setFullName(event.target.value)
+                      setProfileError('')
+                      setProfileSuccess('')
+                    }}
+                    maxLength={120}
+                    autoComplete="name"
+                    disabled={!editingProfileName || savingProfile}
+                    placeholder="Enter your full name"
+                    className={`${inputClass} min-w-0 flex-1`}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditingProfileName(true)
+                      setProfileError('')
+                      setProfileSuccess('')
+                    }}
+                    disabled={savingProfile || editingProfileName}
+                    aria-label="Edit full name"
+                    title="Edit full name"
+                    className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-white/10 text-lg text-slate-300 transition hover:border-blue-400/40 hover:bg-blue-500/10 hover:text-blue-300 disabled:cursor-default disabled:opacity-50"
+                  >
+                    ✎
+                  </button>
+                </div>
               </div>
             </div>
 
@@ -501,14 +532,16 @@ export default function SettingsPage() {
               <p className="text-xs text-white/35">
                 Your name is used to identify you in internal sales-call booking records.
               </p>
-              <button
-                type="button"
-                onClick={() => void saveProfileName()}
-                disabled={savingProfile}
-                className="rounded-xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {savingProfile ? 'Saving Name…' : 'Save Name'}
-              </button>
+              {editingProfileName && hasProfileNameChanges && (
+                <button
+                  type="button"
+                  onClick={() => void saveProfileName()}
+                  disabled={savingProfile || !fullName.trim() || fullName.trim().length > 120}
+                  className="rounded-xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {savingProfile ? 'Saving Name…' : 'Save Name'}
+                </button>
+              )}
             </div>
 
             <p className="mt-3 text-xs text-white/35">
