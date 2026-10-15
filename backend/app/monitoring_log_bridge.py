@@ -96,8 +96,11 @@ def _enqueue(event):
 
 
 def _auto_recoverable(state):
-    # Meta config incidents must never resolve from log silence.
-    return state["category"] != META_CONFIG_CATEGORY
+    if state["category"] == META_CONFIG_CATEGORY:
+        return False
+    if state["service"].startswith("crm_log_app_routes_audio"):
+        return False  # a failed audio row is not fixed by log silence
+    return True
 
 
 class _Bridge(logging.Handler):

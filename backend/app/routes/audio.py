@@ -141,7 +141,23 @@ def run_evaluation_job(audio_id: UUID):
             logger.info("AI follow-up for audio %s: %s", audio_id, outcome)
         except Exception:
             db.rollback()
-            logger.exception("AI follow-up failed for audio %s", audio_id)
+            latest = _repo.get_evaluation(db, audio_id)
+            attempts = int(latest["processing_attempts"]) if latest else AUDIO_MAX_PROCESSING_ATTEMPTS
+            final = attempts >= AUDIO_MAX_PROCESSING_ATTEMPTS
+            if final:
+                logger.error(
+                    "Audio evaluation permanently failed for audio_id=%s after %s attempts",
+                    audio_id, attempts, exc_info=True,
+                )
+            else:
+                logger.warning(
+                    "Audio evaluation attempt %s/%s failed for audio_id=%s; will retry",
+                    attempts, AUDIO_MAX_PROCESSING_ATTEMPTS, audio_id,
+                )
+            _repo.save_evaluation_failure(
+                db, audio_id, "AI call evaluation failed. Please retry.", final,
+            )
+            db.commit()
  
     except EmptyTranscriptError as exc:
         db.rollback()
