@@ -111,14 +111,14 @@ def upload_audio_file(
  
 def run_evaluation_job(audio_id: UUID):
     from app.database import SessionLocal
- 
+
     db = SessionLocal()
     try:
         record = _repo.get_for_evaluation(db, audio_id)
         transcript = record["transcript"] if record else None
- 
+
         evaluation, model_name = evaluate_transcript_with_backoff(transcript)
- 
+
         _repo.save_evaluation_success(
             db,
             audio_id,
@@ -127,11 +127,11 @@ def run_evaluation_job(audio_id: UUID):
             evaluation.model_dump(mode="json"),
         )
         db.commit()
- 
+
         # AI follow-up reminder. Must never break the evaluation itself.
         try:
             from app.services.ai_follow_up import schedule_ai_follow_up
- 
+
             outcome = schedule_ai_follow_up(
                 db,
                 audio_id,
@@ -141,35 +141,28 @@ def run_evaluation_job(audio_id: UUID):
             logger.info("AI follow-up for audio %s: %s", audio_id, outcome)
         except Exception:
             db.rollback()
-            latest = _repo.get_evaluation(db, audio_id)
-            attempts = int(latest["processing_attempts"]) if latest else AUDIO_MAX_PROCESSING_ATTEMPTS
-            final = attempts >= AUDIO_MAX_PROCESSING_ATTEMPTS
-            if final:
-                logger.error(
-                    "Audio evaluation permanently failed for audio_id=%s after %s attempts",
-                    audio_id, attempts, exc_info=True,
-                )
-            else:
-                logger.warning(
-                    "Audio evaluation attempt %s/%s failed for audio_id=%s; will retry",
-                    attempts, AUDIO_MAX_PROCESSING_ATTEMPTS, audio_id,
-                )
-            _repo.save_evaluation_failure(
-                db, audio_id, "AI call evaluation failed. Please retry.", final,
-            )
-            db.commit()
- 
+            logger.exception("AI follow-up failed for audio %s", audio_id)
+
     except EmptyTranscriptError as exc:
         db.rollback()
         _repo.save_evaluation_failure(db, audio_id, str(exc), True)
         db.commit()
- 
+
     except Exception:
-        logger.exception("Audio evaluation failed for audio_id=%s", audio_id)
         db.rollback()
         latest = _repo.get_evaluation(db, audio_id)
         attempts = int(latest["processing_attempts"]) if latest else AUDIO_MAX_PROCESSING_ATTEMPTS
         final = attempts >= AUDIO_MAX_PROCESSING_ATTEMPTS
+        if final:
+            logger.error(
+                "Audio evaluation permanently failed for audio_id=%s after %s attempts",
+                audio_id, attempts, exc_info=True,
+            )
+        else:
+            logger.warning(
+                "Audio evaluation attempt %s/%s failed for audio_id=%s; will retry",
+                attempts, AUDIO_MAX_PROCESSING_ATTEMPTS, audio_id,
+            )
         _repo.save_evaluation_failure(
             db,
             audio_id,
@@ -177,7 +170,7 @@ def run_evaluation_job(audio_id: UUID):
             final,
         )
         db.commit()
- 
+
     finally:
         db.close()
  

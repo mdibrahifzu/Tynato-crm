@@ -27,6 +27,7 @@ _STARTED = False
 
 META_CONFIG_CATEGORY = "CRM_META_CONFIG_ISSUE"
 META_CREDENTIAL_MESSAGE = "Meta Page credential not found"
+AUDIO_LOGGER_PREFIX = "crm_log_app.routes.audio"
 
 
 def _post(event):
@@ -96,10 +97,12 @@ def _enqueue(event):
 
 
 def _auto_recoverable(state):
+    # Meta config incidents must never resolve from log silence.
     if state["category"] == META_CONFIG_CATEGORY:
         return False
-    if state["service"].startswith("crm_log_app_routes_audio"):
-        return False  # a failed audio row is not fixed by log silence
+    # A failed audio row is not fixed by log silence.
+    if state["service"].startswith(AUDIO_LOGGER_PREFIX):
+        return False
     return True
 
 
