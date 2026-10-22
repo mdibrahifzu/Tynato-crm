@@ -4,30 +4,50 @@ export const metadata = { title: "Terms of Service · Tynato CRM" };
 
 export default function TermsPage() {
   return (
-    <LegalShell title="Terms of Service">
-      <p><strong>Last updated:</strong> [DATE]</p>
+    <LegalShell
+      title="Terms of Service"
+      description="Terms governing access to and use of Tynato CRM."
+    >
+      <p><strong>Last updated:</strong> 22 October 2026</p>
       <p>
-        These terms govern your use of Tynato CRM, provided by Tynato Technologies. By using
-        the service you agree to them.
+        These Terms of Service govern use of Tynato CRM, operated by
+        {" "}TYNATO (“Tynato”, “we”, “us”).
+        Do not publish this page until the legal business name and applicable terms have been reviewed.
       </p>
-      <h2>Use of the service</h2>
+
+      <h2>Using the service</h2>
       <p>
-        You may use Tynato CRM to manage your customers, leads and connected Meta assets. You
-        are responsible for the accuracy of the data you add and for having the right to share
-        the Meta Pages and ad accounts you connect.
+        You must use the service lawfully, keep your account credentials secure, and ensure
+        that you have the necessary rights and permissions for information and assets you
+        add or connect. You are responsible for the accuracy and lawful use of information
+        submitted through your account.
       </p>
-      <h2>Meta platform</h2>
+
+      <h2>Connected third-party services</h2>
       <p>
-        Use of Meta data is also subject to Meta's Platform Terms and Developer Policies. You
-        can disconnect Meta at any time, and request deletion as described in our privacy
-        policy.
+        If you connect a Meta account, Page, lead form or advertising account, your use of
+        those services remains subject to the applicable Meta terms and policies. You must
+        have authority to connect the relevant assets. Features available in Tynato CRM depend
+        on the permissions granted and the assets accessible to the connecting account.
       </p>
+
       <h2>Availability and changes</h2>
       <p>
-        We may update the service and these terms. Material changes are announced in the app.
+        Features may change, be unavailable, or depend on third-party services. We will
+        provide notices of material changes where required by applicable law.
       </p>
+
+      <h2>Privacy and deletion</h2>
+      <p>
+        Our handling of information is described in the <a href="/privacy">Privacy Policy</a>.
+        For information about requesting deletion, see <a href="/data-deletion">Data Deletion Instructions</a>.
+      </p>
+
       <h2>Contact</h2>
-      <p>support@tynato.com</p>
+      <p>
+        Questions about these terms can be sent to <a href="mailto:support@tynato.com">support@tynato.com</a>.
+      </p>
+      
     </LegalShell>
   );
 }

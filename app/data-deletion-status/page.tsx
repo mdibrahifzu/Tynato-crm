@@ -1,7 +1,7 @@
 import LegalShell from "../components/LegalShell";
 
 export const dynamic = "force-dynamic";
-export const metadata = { title: "Deletion Status · Tynato CRM" };
+export const metadata = { title: "Deletion Request Status · Tynato CRM" };
 
 type StatusResponse = {
   found: boolean;
@@ -13,12 +13,11 @@ type StatusResponse = {
 async function lookup(code: string): Promise<StatusResponse | null> {
   const base = process.env.CRM_API_URL ?? "https://api.tynato.com";
   try {
-    const res = await fetch(
-      `${base}/meta/data-deletion-status?code=${encodeURIComponent(code)}`,
-      { cache: "no-store" },
-    );
-    if (!res.ok) return null;
-    return (await res.json()) as StatusResponse;
+    const url = new URL("/meta/data-deletion-status", base);
+    url.searchParams.set("code", code);
+    const response = await fetch(url.toString(), { cache: "no-store" });
+    if (!response.ok) return null;
+    return (await response.json()) as StatusResponse;
   } catch {
     return null;
   }
@@ -35,31 +34,54 @@ export default async function DataDeletionStatusPage({
   const result = validCode ? await lookup(code) : null;
 
   return (
-    <LegalShell title="Data Deletion Status">
-      <form method="GET" style={{ display: "flex", gap: 8, margin: "16px 0" }}>
+    <LegalShell
+      title="Deletion Request Status"
+      description="Check the status of a deletion request using the confirmation code supplied by Tynato CRM."
+    >
+      <form method="GET" className="flex flex-col gap-3 sm:flex-row sm:items-center">
+        <label htmlFor="code" className="sr-only">Confirmation code</label>
         <input
+          id="code"
           name="code"
           defaultValue={code}
-          placeholder="Confirmation code"
-          style={{ flex: 1, padding: 10, border: "1px solid #bbb", borderRadius: 6 }}
+          placeholder="Enter confirmation code"
+          autoComplete="off"
+          className="min-w-0 flex-1 rounded-lg border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-indigo-600 focus:ring-2 focus:ring-indigo-100"
         />
-        <button type="submit" style={{ padding: "10px 16px", borderRadius: 6 }}>
+        <button
+          type="submit"
+          className="rounded-lg bg-indigo-700 px-4 py-2.5 text-sm font-semibold text-white hover:bg-indigo-800 focus:outline-none focus:ring-2 focus:ring-indigo-300"
+        >
           Check status
         </button>
       </form>
 
-      {!code && <p>Enter the confirmation code you received after your deletion request.</p>}
-      {code && !validCode && <p>That code is not valid. Check it and try again.</p>}
+      {!code && <p className="text-slate-600">Enter the confirmation code you received for your deletion request.</p>}
+      {code && !validCode && <p role="alert" className="text-red-700">That code format is not valid. Check the code and try again.</p>}
       {validCode && result === null && (
-        <p>The status service is unavailable right now. Please try again shortly.</p>
+        <p role="status" className="text-amber-800">
+          The status service could not be reached. Please try again later or contact
+          {" "}<a href="mailto:support@tynato.com">support@tynato.com</a>.
+        </p>
       )}
-      {validCode && result && !result.found && <p>No deletion request was found for this code.</p>}
+      {validCode && result && !result.found && (
+        <p role="status" className="text-slate-700">No deletion request was found for that code.</p>
+      )}
       {validCode && result?.found && (
-        <div>
-          <p><strong>Status:</strong> {result.status}</p>
-          {result.requested_at && <p><strong>Requested:</strong> {result.requested_at}</p>}
-          {result.completed_at && <p><strong>Completed:</strong> {result.completed_at}</p>}
-        </div>
+        <dl className="grid gap-3 rounded-xl border border-slate-200 bg-slate-50 p-4 sm:grid-cols-2">
+          <div>
+            <dt className="text-xs font-medium uppercase tracking-wide text-slate-500">Status</dt>
+            <dd className="mt-1 font-semibold text-slate-900">{result.status ?? "Status not provided"}</dd>
+          </div>
+          {result.requested_at ? <div>
+            <dt className="text-xs font-medium uppercase tracking-wide text-slate-500">Request received</dt>
+            <dd className="mt-1 text-slate-800">{result.requested_at}</dd>
+          </div> : null}
+          {result.completed_at ? <div>
+            <dt className="text-xs font-medium uppercase tracking-wide text-slate-500">Completed</dt>
+            <dd className="mt-1 text-slate-800">{result.completed_at}</dd>
+          </div> : null}
+        </dl>
       )}
     </LegalShell>
   );
