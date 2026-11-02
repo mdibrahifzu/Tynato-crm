@@ -1,52 +1,35 @@
 import { supabase } from './supabase'
- 
+
 /* =========================================================
-   API FETCH
+   ACCESS TOKEN CACHE
+   Updated by Supabase auth events so requests do not wait
+   on getSession() for every call.
    ========================================================= */
- 
-export async function apiFetch(
-  path: string,
-  options: RequestInit = {},
-) {
-  const { data, error } =
-    await supabase.auth.getSession()
- 
-  if (error) {
-    console.error(
-      'Failed to get session:',
-      error,
-    )
- 
-    const message = error.message.toLowerCase()
-    const isInvalidRefreshToken =
-      message.includes('invalid refresh token') ||
-      message.includes('refresh token not found') ||
-      message.includes('refresh token')
- 
-    if (isInvalidRefreshToken) {
-      await supabase.auth.signOut({
-        scope: 'local',
-      })
- 
-      if (typeof window !== 'undefined') {
-        window.location.replace('/login')
-      }
-    }
- 
-    throw error
-  }
- 
-  const token =
-    data.session?.access_token
- 
-  if (!token) {
-    if (typeof window !== 'undefined') {
-      window.location.replace('/login')
-    }
- 
-    throw new Error('Not authenticated')
-  }
- 
+
+let cachedAccessToken: string | null = null
+let authListenerReady = false
+
+function ensureAuthListener() {
+  // Browser only: the server has no window and no user session.
+  if (authListenerReady || typeof window === 'undefined') return
+
+  authListenerReady = true
+
+  supabase.auth.onAuthStateChange((_event, session) => {
+    cachedAccessToken = session?.access_token ?? null
+  })
+}
+
+/* =========================================================
+   IN-FLIGHT GET DE-DUPLICATION
+   Identical GET requests that start while one is still
+   running share that single network call. Only in-flight
+   requests are shared, so no stale data is ever returned.
+   ========================================================= */
+
+const inflightGets = new Map<string, Promise<Response>>()
+
+function resolveBaseUrl(): string {
   /*
    * NEXT_PUBLIC_* values are inlined at build time.
    * Localhost fallback is allowed in development ONLY, so a
@@ -61,37 +44,129 @@ export async function apiFetch(
   )
     .trim()
     .replace(/\/+$/, '')
- 
+
   if (!baseUrl) {
-    throw new Error(
-      'NEXT_PUBLIC_API_URL is not configured',
-    )
+    throw new Error('NEXT_PUBLIC_API_URL is not configured')
   }
- 
-  const res = await fetch(
-    `${baseUrl}${path}`,
-    {
-      ...options,
-      headers: {
-        ...options.headers,
-        Authorization: `Bearer ${token}`,
-      },
-    },
-  )
- 
-  if (res.status === 401) {
-    await supabase.auth.signOut({
-      scope: 'local',
-    })
- 
+
+  return baseUrl
+}
+
+async function getAccessToken(): Promise<string> {
+  let token = cachedAccessToken
+
+  if (!token) {
+    const { data, error } = await supabase.auth.getSession()
+
+    if (error) {
+      console.error('Failed to get session:', error)
+
+      const message = error.message.toLowerCase()
+      const isInvalidRefreshToken =
+        message.includes('invalid refresh token') ||
+        message.includes('refresh token not found') ||
+        message.includes('refresh token')
+
+      if (isInvalidRefreshToken) {
+        await supabase.auth.signOut({ scope: 'local' })
+
+        if (typeof window !== 'undefined') {
+          window.location.replace('/login')
+        }
+      }
+
+      throw error
+    }
+
+    token = data.session?.access_token ?? null
+    cachedAccessToken = token
+  }
+
+  if (!token) {
     if (typeof window !== 'undefined') {
       window.location.replace('/login')
     }
- 
-    throw new Error('Session expired')
+
+    throw new Error('Not authenticated')
   }
- 
-  return res
+
+  return token
+}
+
+async function sendRequest(
+  url: string,
+  options: RequestInit,
+  token: string,
+): Promise<Response> {
+  const res = await fetch(url, {
+    ...options,
+    headers: {
+      ...options.headers,
+      Authorization: `Bearer ${token}`,
+    },
+  })
+
+  if (res.status !== 401) {
+    return res
+  }
+
+  // A 401 can come from the CRM session or from an upstream service (Meta).
+  // Only a dead Supabase session should log the user out.
+  const { data, error } = await supabase.auth.refreshSession()
+
+  if (!error && data.session?.access_token) {
+    // CRM session is healthy. Return the 401 so the page shows the backend's message.
+    cachedAccessToken = data.session.access_token
+    return res
+  }
+
+  // The CRM session is really gone.
+  await supabase.auth.signOut({ scope: 'local' })
+
+  if (typeof window !== 'undefined') {
+    window.location.replace('/login')
+  }
+
+  throw new Error('Session expired')
+}
+
+/* =========================================================
+   API FETCH
+   ========================================================= */
+
+export async function apiFetch(
+  path: string,
+  options: RequestInit = {},
+) {
+  ensureAuthListener()
+
+  const token = await getAccessToken()
+  const url = `${resolveBaseUrl()}${path}`
+  const method = (options.method ?? 'GET').toUpperCase()
+
+  // Writes are never shared: each one must run exactly once.
+  if (method !== 'GET') {
+    return sendRequest(url, options, token)
+  }
+
+  // Key includes the token, so two different users never share a response.
+  const key = `${token}|${url}`
+  const pending = inflightGets.get(key)
+
+  if (pending) {
+    // A Response body can be read only once, so each caller gets a copy.
+    return (await pending).clone()
+  }
+
+  const request = sendRequest(url, options, token)
+  inflightGets.set(key, request)
+
+  try {
+    const res = await request
+    return res.clone()
+  } finally {
+    inflightGets.delete(key)
+  }
 }
  
  
@@ -663,4 +738,31 @@ export async function rescheduleSalesCall(
  
   return parseApiResponse<SalesCallBooking>(res)
 }
- 
+
+/* =========================================================
+   APP SESSION
+   One call after login: identity, platform role, scheduler
+   flag, and team. Replaces the separate access probes.
+   ========================================================= */
+
+export interface AppSession {
+  user_id: string
+  email: string | null
+  full_name: string | null
+  role: string
+  platform_role: 'user' | 'super_admin'
+  is_super_admin: boolean
+  is_sales_scheduler: boolean
+  team: {
+    team_id: string
+    team_name: string
+    team_role: string
+    team_status: 'active' | 'suspended'
+  } | null
+}
+
+export async function getAppSession(): Promise<AppSession> {
+  const res = await apiFetch('/session')
+
+  return parseApiResponse<AppSession>(res)
+}
